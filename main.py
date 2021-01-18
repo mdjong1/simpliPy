@@ -10,13 +10,6 @@ from math import floor
 TRIANGULATION_THRESHOLD = 1
 
 
-class Vertex:
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
-
-
 class Triangulation:
     def __init__(self):
         self.total_points = None
@@ -40,6 +33,25 @@ class Triangulation:
         self.max_x = max_x
         self.max_y = max_y
 
+        self.initialize_triangulations()
+
+    def initialize_triangulations(self):
+        for x in np.arange(self.min_x, self.max_x, self.cell_size):
+            for y in np.arange(self.min_y, self.max_y, self.cell_size):
+                grid_cell = self.get_cell(x, y)
+
+                initial_points = [
+                    [x, y, 0],
+                    [x + self.cell_size, y, 0],
+                    [x, y + self.cell_size, 0],
+                    [x + self.cell_size, y + self.cell_size, 0]
+                ]
+
+                dt = startin.DT()
+                dt.insert(initial_points)
+
+                self.triangulations[grid_cell[0]][grid_cell[1]] = dt
+
     def initialize_grid(self, grid_size):
         self.grid_dimensions = grid_size
         self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
@@ -48,30 +60,16 @@ class Triangulation:
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
-        if self.triangulations[grid_cell[0]][grid_cell[1]] is None:
+        interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_laplace(x, y)
 
+        if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
             if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
                 self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
 
             else:
                 self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
 
-            if len(self.grid_points[grid_cell[0]][grid_cell[1]]) == 5:
-                dt = startin.DT()
-                dt.insert(self.grid_points[grid_cell[0]][grid_cell[1]])
-                self.triangulations[grid_cell[0]][grid_cell[1]] = dt
-
-        else:
-            try:
-                interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_laplace(x, y)
-
-                if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
-                    self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
-                    self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z)
-
-            except OSError:  # Outside convex hull (CH)
-                self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
-                self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z)
+            self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z)
 
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
