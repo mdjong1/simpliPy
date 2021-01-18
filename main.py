@@ -60,7 +60,7 @@ class Triangulation:
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
-        interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_laplace(x, y)
+        interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_nn(x, y)
 
         if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
             if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
