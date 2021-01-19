@@ -92,8 +92,8 @@ class Processor:
         identifier = split_line[0]
         data = split_line[1:]
 
-        if identifier == "#":
-            return
+        if identifier == "#" or identifier == "":
+            pass
 
         elif identifier == "n":
             # Total number of points
@@ -134,7 +134,4 @@ if __name__ == "__main__":
     processor = Processor(triangulation)
 
     for stdin_line in sys.stdin.readlines():
-        if stdin_line == "":
-            continue
-
         processor.process_line(stdin_line)
