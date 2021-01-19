@@ -1,5 +1,4 @@
 import sys
-import fileinput
 import startin
 
 import numpy as np
@@ -134,7 +133,7 @@ if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
 
-    for stdin_line in fileinput.input():
+    for stdin_line in sys.stdin.readlines():
         if stdin_line == "":
             continue
 
