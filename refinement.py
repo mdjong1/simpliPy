@@ -6,7 +6,7 @@ import numpy as np
 from math import floor
 
 
-TRIANGULATION_THRESHOLD = 1
+TRIANGULATION_THRESHOLD = 2
 
 
 class Triangulation:
