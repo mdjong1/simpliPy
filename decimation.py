@@ -1,12 +1,11 @@
 import sys
 import startin
 
-import numpy as np
+from ast import literal_eval
 
-from math import floor
 
 TRIANGULATION_THRESHOLD = 2
-PROCESSING_THRESHOLD = 1000
+PROCESSING_THRESHOLD = 1E-9
 
 
 class Triangulation:
@@ -19,7 +18,13 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
-        self.triangulation = None
+        self.triangulation = startin.DT()
+        self.triangulation.set_is_init(True)
+
+        self.processing_id = 1
+        self.processing_index = 1
+
+        self.finalized = {}
 
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
@@ -29,48 +34,65 @@ class Triangulation:
 
     def add_vertex(self, x, y, z):
         self.vertices[self.vertex_id] = [x, y, z]
+
+        self.triangulation.insert_vertex(self.vertex_id, x, y, z)
+
         self.vertex_id += 1
 
-        if len(self.vertices) > PROCESSING_THRESHOLD:
-            self.simplify_triangulation()
-
     def simplify_triangulation(self):
-        output_triangulation = startin.DT()
 
         not_done = True
 
+        total_vertices = self.triangulation.number_of_vertices()
+
         while not_done:
-            max_delta = 0
+            min_delta = 1E9
             max_index = -1
 
-            for i in range(1, len(self.vertices) + 1):
-                x = self.vertices[i][0]
-                y = self.vertices[i][1]
-                z = self.vertices[i][2]
+            for vertex_id in range(total_vertices):
+                # Not infinite vertex or vertex on CH or vertex previously removed
+                if vertex_id == 0 or \
+                        self.triangulation.is_vertex_convex_hull(vertex_id) or \
+                        self.triangulation.is_vertex_removed(vertex_id):
+                    continue
 
-                try:
-                    interpolated_value = output_triangulation.interpolate_nn(x, y)
+                vertex = self.triangulation.get_point(vertex_id)
 
-                    if abs(interpolated_value - z) > max_delta:
-                        max_index = i
-                        max_delta = abs(interpolated_value - z)
-                except:
-                    output_triangulation.insert_one_pt(x, y, z)
+                self.triangulation.remove(vertex_id)
 
-            if max_delta > TRIANGULATION_THRESHOLD and max_index != -1:
-                output_triangulation.insert_one_pt(self.vertices[max_index][0], self.vertices[max_index][1], self.vertices[max_index][2])
+                end_value = self.triangulation.interpolate_tin_linear(vertex[0], vertex[1])
+
+                self.triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2])
+
+                delta = abs(end_value - vertex[2])
+
+                if delta < min_delta:
+                    min_delta = delta
+                    max_index = vertex_id
+
+            if max_index != -1 and min_delta < TRIANGULATION_THRESHOLD:
+                self.triangulation.remove(max_index)
 
             else:
                 not_done = False
 
-        for vertex in output_triangulation.all_vertices():
+        for vertex in self.triangulation.all_vertices():
             sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
-        for edge in output_triangulation.all_triangles():
+        for edge in self.triangulation.all_triangles():
             sys.stdout.write("f " + str(edge[0] + 1) + " " + str(edge[1] + 1) + " " + str(edge[2] + 1) + "\n")
 
+    def new_star(self, index, neighbors):
+        if neighbors:
+            self.triangulation.define_star(index, neighbors)
+
+        # if self.vertex_id / self.processing_id >= PROCESSING_THRESHOLD:
+        #     self.simplify_triangulation()
+        #     self.processing_id += 1
+        #     self.processing_index += PROCESSING_THRESHOLD
+
     def delete_vertex(self, index):
-        pass
+        self.finalized[index] = True
         # del self.vertices[index]
         # self.triangulation.remove(index)
 
@@ -78,6 +100,9 @@ class Triangulation:
 class Processor:
     def __init__(self, dt):
         self._triangulation = dt
+
+    def simplify(self):
+        self._triangulation.simplify_triangulation()
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
@@ -102,7 +127,8 @@ class Processor:
 
         elif identifier == "x":
             # vertex finalizer
-            self._triangulation.delete_vertex(int(data[0]))
+            # self._triangulation.delete_vertex(int(data[0]))
+            self._triangulation.new_star(int(data[0]), literal_eval("".join(data[1:])))
 
         else:
             # Unknown identifier in stream
@@ -115,3 +141,4 @@ if __name__ == "__main__":
 
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
+    processor.simplify()
