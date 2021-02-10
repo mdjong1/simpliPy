@@ -1,6 +1,7 @@
 import math
 import os
 import subprocess
+import time
 
 from laspy.file import File
 from numpy.ma import masked_array
@@ -25,7 +26,7 @@ class Bbox:
 cell_size = 50
 simplify_epsilon = 0.2
 
-input_file = "data\\crop.laz"
+input_file = "H:\\LAZ\\c_37en1_big_delft.laz"
 output_directory = "sliced"
 npy_directory = "npyd"
 
@@ -56,6 +57,9 @@ for file in os.listdir(output_directory):
     datadict = io_las.read_las(output_directory + "\\" + file)
     io_npy.write_npy(npy_directory + "\\" + file.split(".")[0], datadict, ['coords', 'offset'])
 
+    time.sleep(1)
+
+
 for subdirectory in os.listdir(npy_directory):
     subprocess.run(["thirdparty\\masbcpp\\compute_normals", npy_directory + "\\" + subdirectory])
     subprocess.run(["thirdparty\\masbcpp\\compute_ma", npy_directory + "\\" + subdirectory])
@@ -67,4 +71,6 @@ for subdirectory in os.listdir(npy_directory):
     outfile = open("simplified" + "\\" + subdirectory + ".obj", mode="w")
     sstfin = subprocess.Popen(["thirdparty\\sst\\sstfin.exe", "simplified" + "\\" + subdirectory + ".laz", "10"], stdout=subprocess.PIPE)
     output = subprocess.Popen(["thirdparty\\sst\\sstdt.exe"], stdin=sstfin.stdout, stdout=outfile)
+
+    time.sleep(1)
 

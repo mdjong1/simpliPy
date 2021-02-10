@@ -1,1 +1,8 @@
 .idea/
+
+data/
+npyd/
+simplified/
+sliced/
+
+*.obj
