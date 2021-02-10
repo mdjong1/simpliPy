@@ -4,8 +4,8 @@ import startin
 from ast import literal_eval
 
 
-TRIANGULATION_THRESHOLD = 2
-PROCESSING_THRESHOLD = 1E-9
+TRIANGULATION_THRESHOLD = 0.001
+PROCESSING_THRESHOLD = 1000
 
 
 class Triangulation:
@@ -50,15 +50,23 @@ class Triangulation:
             max_index = -1
 
             for vertex_id in range(total_vertices):
+                neighbors_finalized = [self.finalized[v_id][0] is True for v_id in self.triangulation.adjacent_vertices_to_vertex(vertex_id) if v_id in self.finalized.keys()]
+
                 # Not infinite vertex or vertex on CH or vertex previously removed
                 if vertex_id == 0 or \
                         self.triangulation.is_vertex_convex_hull(vertex_id) or \
-                        self.triangulation.is_vertex_removed(vertex_id):
+                        self.triangulation.is_vertex_removed(vertex_id) or \
+                        vertex_id not in self.finalized.keys() or \
+                        not self.finalized[vertex_id][0] or \
+                        len(neighbors_finalized) != self.finalized[vertex_id][1] or \
+                        not any(neighbors_finalized):
                     continue
 
                 vertex = self.triangulation.get_point(vertex_id)
 
                 self.triangulation.remove(vertex_id)
+
+                print(vertex_id)
 
                 end_value = self.triangulation.interpolate_tin_linear(vertex[0], vertex[1])
 
@@ -71,6 +79,7 @@ class Triangulation:
                     max_index = vertex_id
 
             if max_index != -1 and min_delta < TRIANGULATION_THRESHOLD:
+                print("Removing:", max_index)
                 self.triangulation.remove(max_index)
 
             else:
@@ -80,16 +89,17 @@ class Triangulation:
             sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         for edge in self.triangulation.all_triangles():
-            sys.stdout.write("f " + str(edge[0] + 1) + " " + str(edge[1] + 1) + " " + str(edge[2] + 1) + "\n")
+            sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
 
     def new_star(self, index, neighbors):
+        self.finalized[index] = (True, len(neighbors))
         if neighbors:
             self.triangulation.define_star(index, neighbors)
 
-        # if self.vertex_id / self.processing_id >= PROCESSING_THRESHOLD:
-        #     self.simplify_triangulation()
-        #     self.processing_id += 1
-        #     self.processing_index += PROCESSING_THRESHOLD
+        if self.vertex_id / self.processing_id >= PROCESSING_THRESHOLD:
+            self.simplify_triangulation()
+            self.processing_id += 1
+            self.processing_index += PROCESSING_THRESHOLD
 
     def delete_vertex(self, index):
         self.finalized[index] = True
@@ -141,4 +151,3 @@ if __name__ == "__main__":
 
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
-    processor.simplify()
