@@ -5,7 +5,7 @@ from ast import literal_eval
 
 
 TRIANGULATION_THRESHOLD = 0.001
-PROCESSING_THRESHOLD = 1000
+PROCESSING_THRESHOLD = 75000
 
 
 class Triangulation:
@@ -33,7 +33,7 @@ class Triangulation:
         self.max_y = max_y
 
     def add_vertex(self, x, y, z):
-        self.vertices[self.vertex_id] = [x, y, z]
+        # self.vertices[self.vertex_id] = [x, y, z]
 
         self.triangulation.insert_vertex(self.vertex_id, x, y, z)
 
@@ -45,32 +45,31 @@ class Triangulation:
 
         total_vertices = self.triangulation.number_of_vertices()
 
+        print("Processing {} vertices!".format(total_vertices))
+
+        # self.triangulation.write_geojson_triangles("data\\pre_simplifying_triangles.json")
+
         while not_done:
             min_delta = 1E9
             max_index = -1
 
-            for vertex_id in range(total_vertices):
-                neighbors_finalized = [self.finalized[v_id][0] is True for v_id in self.triangulation.adjacent_vertices_to_vertex(vertex_id) if v_id in self.finalized.keys()]
-
+            for vertex_id in self.triangulation.all_vertex_ids(True):
                 # Not infinite vertex or vertex on CH or vertex previously removed
-                if vertex_id == 0 or \
-                        self.triangulation.is_vertex_convex_hull(vertex_id) or \
-                        self.triangulation.is_vertex_removed(vertex_id) or \
-                        vertex_id not in self.finalized.keys() or \
-                        not self.finalized[vertex_id][0] or \
-                        len(neighbors_finalized) != self.finalized[vertex_id][1] or \
-                        not any(neighbors_finalized):
+                if not self.triangulation.can_vertex_be_removed(vertex_id):
                     continue
 
                 vertex = self.triangulation.get_point(vertex_id)
 
+                # print(vertex_id)
+
+                # print("Doing 'fake' remove of:", vertex_id, vertex[0], vertex[1], vertex[2])
                 self.triangulation.remove(vertex_id)
 
-                print(vertex_id)
-
+                # print("Interpolating: x=" + str(vertex[0]) + ", y=" + str(vertex[1]))
                 end_value = self.triangulation.interpolate_tin_linear(vertex[0], vertex[1])
 
-                self.triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2])
+                # print("Inserting " + str(vertex_id))
+                self.triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2], vertex_id)
 
                 delta = abs(end_value - vertex[2])
 
@@ -78,21 +77,32 @@ class Triangulation:
                     min_delta = delta
                     max_index = vertex_id
 
+            # print(max_index, min_delta)
+
             if max_index != -1 and min_delta < TRIANGULATION_THRESHOLD:
-                print("Removing:", max_index)
+                # print("Removing:", max_index, min_delta)
                 self.triangulation.remove(max_index)
 
             else:
                 not_done = False
 
+        # self.triangulation.write_geojson_triangles("data\\simplified_" + str(self.processing_index) + ".json")
+
         for vertex in self.triangulation.all_vertices():
-            sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+            if vertex[0] >= 0:
+                sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         for edge in self.triangulation.all_triangles():
             sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
 
+        self.triangulation.cleanup_complete_stars()
+
+        # Reset triangulation for next set of points
+        # self.triangulation = startin.DT()
+        # self.triangulation.set_is_init(True)
+
     def new_star(self, index, neighbors):
-        self.finalized[index] = (True, len(neighbors))
+        # self.finalized[index] = (True, len(neighbors))
         if neighbors:
             self.triangulation.define_star(index, neighbors)
 
@@ -151,3 +161,13 @@ if __name__ == "__main__":
 
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
+
+    # Finalize remaining points
+    triangulation.simplify_triangulation()
+
+    # for vertex in triangulation.triangulation.all_vertices():
+    #     if vertex[0] >= 0:
+    #         sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+    #
+    # for edge in triangulation.triangulation.all_triangles():
+    #     sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
