@@ -1,7 +1,8 @@
 import subprocess
 import sys
 
-input_file = "H:\\LAZ\\c_37en1_big_delft.laz"
+# input_file = "H:\\LAZ\\c_37en1_big_delft.laz"
+input_file = "data\\crop.laz"
 
 
 lasinfo = subprocess.check_output(["thirdparty\\lastools\\lasinfo", "-i", input_file, "-stdout"])
@@ -33,20 +34,16 @@ offset = {
 }
 
 
-las2txt = subprocess.Popen(["thirdparty\\lastools\\las2txt", "-i", input_file, "-stdout"], stdout=subprocess.PIPE)
+las2txt = subprocess.Popen(["thirdparty\\lastools\\las2txt", "-drop_class", "3", "4", "5", "-i", input_file, "-stdout"], stdout=subprocess.PIPE)
 
 for line in las2txt.stdout:
     stripped_line = str(line.rstrip(), "utf-8")
     split_line = stripped_line.split()
     split_line = [float(val) for val in split_line]
 
-    # x = round(split_line[0] - offset[0], 4)
-    # y = round(split_line[1] - offset[1], 4)
-    # z = round(split_line[2] - offset[2], 4)
-
-    x = round(split_line[0], 4)
-    y = round(split_line[1], 4)
-    z = round(split_line[2], 4)
+    x = round(split_line[0] - offset[0], 4)
+    y = round(split_line[1] - offset[1], 4)
+    z = round(split_line[2] - offset[2], 4)
 
     sys.stdout.write(str(x) + " " + str(y) + " " + str(z) + "\n")
 
