@@ -1,11 +1,11 @@
 import sys
 import startin
 
+from heapq import heappush, heappop
 from ast import literal_eval
 
-
-TRIANGULATION_THRESHOLD = 0.001
-PROCESSING_THRESHOLD = 75000
+TRIANGULATION_THRESHOLD = 0.2
+PROCESSING_THRESHOLD = 5000
 
 
 class Triangulation:
@@ -31,6 +31,7 @@ class Triangulation:
         self.min_y = min_y
         self.max_x = max_x
         self.max_y = max_y
+        self.triangulation.output_bbox(min_x, min_y, max_x, max_y)
 
     def add_vertex(self, x, y, z):
         # self.vertices[self.vertex_id] = [x, y, z]
@@ -39,67 +40,67 @@ class Triangulation:
 
         self.vertex_id += 1
 
-    def simplify_triangulation(self):
+    def calculate_delta(self, vertex_id):
+        vertex = self.triangulation.get_point(vertex_id)
 
-        not_done = True
+        self.triangulation.remove(vertex_id)
+        end_value = self.triangulation.interpolate_tin_linear(vertex[0], vertex[1])
+
+        self.triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2], vertex_id)
+
+        return abs(end_value - vertex[2])
+
+    def simplify_triangulation(self, finalize=False):
 
         total_vertices = self.triangulation.number_of_vertices()
 
-        print("Processing {} vertices!".format(total_vertices))
+        # print("Processing {} vertices!".format(total_vertices))
 
-        # self.triangulation.write_geojson_triangles("data\\pre_simplifying_triangles.json")
+        heap = []
 
-        while not_done:
-            min_delta = 1E9
-            max_index = -1
+        # Only get stars that have not yet been written
+        for vertex_id in self.triangulation.all_vertex_ids_written(False):
+            # Not infinite vertex or vertex on CH or vertex previously removed
+            if not self.triangulation.can_vertex_be_removed(vertex_id):
+                continue
 
-            for vertex_id in self.triangulation.all_vertex_ids(True):
-                # Not infinite vertex or vertex on CH or vertex previously removed
-                if not self.triangulation.can_vertex_be_removed(vertex_id):
-                    continue
+            heappush(heap, (self.calculate_delta(vertex_id), vertex_id))
 
-                vertex = self.triangulation.get_point(vertex_id)
+        try:
+            smallest_delta_vertex = heappop(heap)
+        except IndexError:  # No items in heap; no vertices 'can_vertex_be_removed()'
+            return
 
-                # print(vertex_id)
+        remove_count = 0
 
-                # print("Doing 'fake' remove of:", vertex_id, vertex[0], vertex[1], vertex[2])
-                self.triangulation.remove(vertex_id)
+        while smallest_delta_vertex:
+            # Get latest delta for this point
+            delta = self.calculate_delta(smallest_delta_vertex[1])
 
-                # print("Interpolating: x=" + str(vertex[0]) + ", y=" + str(vertex[1]))
-                end_value = self.triangulation.interpolate_tin_linear(vertex[0], vertex[1])
+            # If delta is still below threshold, throw it out
+            if delta < TRIANGULATION_THRESHOLD:
+                # print("Removing {} with delta {}".format(val[1], delta))
+                remove_count += 1
+                self.triangulation.remove(smallest_delta_vertex[1])
 
-                # print("Inserting " + str(vertex_id))
-                self.triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2], vertex_id)
+            try:
+                smallest_delta_vertex = heappop(heap)
+            except IndexError:
+                smallest_delta_vertex = None
 
-                delta = abs(end_value - vertex[2])
+        # self.triangulation.write_geojson_triangles("data\\after_simplification" + str(remove_count) + ".json")
 
-                if delta < min_delta:
-                    min_delta = delta
-                    max_index = vertex_id
+        self.triangulation.write_stars_obj(finalize)
 
-            # print(max_index, min_delta)
+        # for vertex in self.triangulation.all_unwritten_vertices(finalize):
+        #     if vertex[0] > 0:
+        #         sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+        #
+        # for edge in self.triangulation.all_unwritten_triangles():
+        #     sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
 
-            if max_index != -1 and min_delta < TRIANGULATION_THRESHOLD:
-                # print("Removing:", max_index, min_delta)
-                self.triangulation.remove(max_index)
-
-            else:
-                not_done = False
-
-        # self.triangulation.write_geojson_triangles("data\\simplified_" + str(self.processing_index) + ".json")
-
-        for vertex in self.triangulation.all_vertices():
-            if vertex[0] >= 0:
-                sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
-
-        for edge in self.triangulation.all_triangles():
-            sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
-
-        self.triangulation.cleanup_complete_stars()
-
-        # Reset triangulation for next set of points
-        # self.triangulation = startin.DT()
-        # self.triangulation.set_is_init(True)
+        # print("Removed {} points in decimation process".format(remove_count))
+        # self.triangulation.cleanup_complete_stars()
 
     def new_star(self, index, neighbors):
         # self.finalized[index] = (True, len(neighbors))
@@ -163,11 +164,5 @@ if __name__ == "__main__":
         processor.process_line(stdin_line)
 
     # Finalize remaining points
-    triangulation.simplify_triangulation()
+    triangulation.simplify_triangulation(finalize=True)
 
-    # for vertex in triangulation.triangulation.all_vertices():
-    #     if vertex[0] >= 0:
-    #         sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
-    #
-    # for edge in triangulation.triangulation.all_triangles():
-    #     sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
