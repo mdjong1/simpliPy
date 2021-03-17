@@ -68,8 +68,6 @@ class Triangulation:
 
         self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z, 0)
 
-        self.global_vertex_id += 1
-
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
