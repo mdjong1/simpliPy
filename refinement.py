@@ -6,7 +6,11 @@ import numpy as np
 from math import floor
 
 
-TRIANGULATION_THRESHOLD = 2
+TRIANGULATION_THRESHOLD = 0.5
+
+
+def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
+    return abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
 class Triangulation:
@@ -56,19 +60,30 @@ class Triangulation:
         self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
         self.triangulations = np.empty(shape=(grid_size, grid_size), dtype=object)
 
+    def insert_point(self, x, y, z, grid_cell):
+        if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
+            self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
+        else:
+            self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
+
+        self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z, 0)
+
+        self.global_vertex_id += 1
+
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
-        interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_laplace(x, y)
+        # Always include points on bbox
+        if is_almost(x, self.min_x, abs_tol=0.01) or is_almost(x, self.max_x, abs_tol=0.01) or \
+                is_almost(y, self.min_y, abs_tol=0.01) or is_almost(y, self.max_y, abs_tol=0.01):
 
-        if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
-            if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
-                self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
+                self.insert_point(x, y, z, grid_cell)
 
-            else:
-                self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
+        else:
+            interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_tin_linear(x, y)
 
-            self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z)
+            if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
+                self.insert_point(x, y, z, grid_cell)
 
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
