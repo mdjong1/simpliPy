@@ -6,7 +6,7 @@ import numpy as np
 from math import floor
 
 
-TRIANGULATION_THRESHOLD = 0.5
+TRIANGULATION_THRESHOLD = 1
 
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -71,16 +71,17 @@ class Triangulation:
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
-        # Always include points on bbox
-        if is_almost(x, self.min_x, abs_tol=0.01) or is_almost(x, self.max_x, abs_tol=0.01) or \
-                is_almost(y, self.min_y, abs_tol=0.01) or is_almost(y, self.max_y, abs_tol=0.01):
+        # Always include points on outer bbox
+        if is_almost(x, self.min_x, abs_tol=0.0001) or is_almost(x, self.max_x, abs_tol=0.001) or \
+                is_almost(y, self.min_y, abs_tol=0.001) or is_almost(y, self.max_y, abs_tol=0.001):
 
-                self.insert_point(x, y, z, grid_cell)
+            self.insert_point(x, y, z, grid_cell)
 
         else:
             interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_tin_linear(x, y)
 
             if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
+                sys.stderr.write("{} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
                 self.insert_point(x, y, z, grid_cell)
 
     def get_cell(self, x, y):
