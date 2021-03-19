@@ -1,4 +1,7 @@
+import queue
 import sys
+import threading
+
 import startin
 
 import numpy as np
@@ -13,7 +16,6 @@ TRIANGULATION_THRESHOLD = 0.2
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
-
 
 
 class Triangulation:
@@ -32,9 +34,15 @@ class Triangulation:
         self.max_y = None
 
         self.vertices = {}
-
-        self.heap = None
-        self.triangulation = None
+    #     self.stdout = queue.Queue()
+    #
+    #     threading.Thread(target=self.worker, daemon=True).start()
+    #
+    # def worker(self):
+    #     while True:
+    #         sys.stdout.write(self.stdout.get())
+    #         sys.stdout.flush()
+    #         self.stdout.task_done()
 
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
@@ -55,53 +63,19 @@ class Triangulation:
         else:
             self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
 
-        # # Always include points on outer bbox
-        # if is_almost(x, self.min_x, abs_tol=0.0001) or is_almost(x, self.max_x, abs_tol=0.001) or \
-        #         is_almost(y, self.min_y, abs_tol=0.001) or is_almost(y, self.max_y, abs_tol=0.001):
-        #
-        #     self.insert_point(x, y, z, grid_cell)
-        #
-        # else:
-        #     interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_tin_linear(x, y)
-        #
-        #     if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
-        #         sys.stderr.write("{} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
-        #         self.insert_point(x, y, z, grid_cell)
-
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
 
-    def get_newest_max_abs(self, attempts=0):
-        if attempts > 100:
-            return heappop(self.heap)
+    def finalize(self, grid_x, grid_y, input_line):
 
-        try:
-            new_val = abs(self.triangulation.interpolate_tin_linear(self.heap[0][1][0], self.heap[0][1][1]) - self.heap[0][1][2]) * -1
-        except OSError:
-            return heappop(self.heap)
+        if self.grid_points[grid_x][grid_y] is None:
+            sys.stdout.write(input_line)
+            # self.stdout.put(input_line)
+            return
 
-        old_val = self.heap[0]
-        self.heap[0] = (new_val, self.heap[0][1])
+        heap = []
 
-        if new_val > old_val[0]:
-            _siftup(self.heap, 0)
-        else:
-            _siftdown(self.heap, 0, 0)
-
-        # Check if largest abs is still the same point
-        if self.heap[0][1] != old_val[1]:
-            return self.get_newest_max_abs(attempts=attempts + 1)
-
-        try:
-            return heappop(self.heap)
-        except IndexError:
-            return 0
-
-    def finalize(self, grid_x, grid_y):
-
-        self.heap = []
-
-        self.triangulation = startin.DT()
+        triangulation = startin.DT()
 
         x_vals = []
         y_vals = []
@@ -130,56 +104,58 @@ class Triangulation:
             # add a corner point with average z value of 10 nearest
             near_corner_points.append([corner_point[0], corner_point[1], sum(z_vals) / len(z_vals)])
 
-        self.triangulation.insert(near_corner_points)
+        triangulation.insert(near_corner_points)
 
-        if self.grid_points[grid_x][grid_y] is not None:
-            for point in self.grid_points[grid_x][grid_y]:
+        for point in self.grid_points[grid_x][grid_y]:
 
-                interpolated_value = self.triangulation.interpolate_tin_linear(point[0], point[1])
+            interpolated_value = triangulation.interpolate_tin_linear(point[0], point[1])
 
-                # Heap is min-based, so multiply by -1 to ensure max delta is at top
-                delta = abs(interpolated_value - point[2]) * -1
+            # Heap is min-based, so multiply by -1 to ensure max delta is at top
+            delta = abs(interpolated_value - point[2]) * -1
 
-                self.heap.append((delta, point))
+            heap.append((delta, point))
 
-        heapify(self.heap)
+        heapify(heap)
 
         while True:
 
-            largest_delta = self.get_newest_max_abs()
+            sys.stdout.write("{}\n".format(len(heap)))
 
-            if largest_delta[0] * -1 > TRIANGULATION_THRESHOLD:
-                self.triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
-            else:
+            try:
+                largest_delta = heappop(heap)
+            except IndexError:
                 break
 
+            try:
+                if largest_delta[0] * -1 > TRIANGULATION_THRESHOLD:
+                    triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+                else:
+                    break
+
+            except OSError:
+                pass
+                # sys.stdout.write("Managed to find one outside CH\n")
+                # triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+
             # Recalculate all in heap
-            # for i in range(len(self.heap)):
-            #     new_val = self.triangulation.interpolate_tin_linear(self.heap[i][1][0], self.heap[i][1][1]) * -1
-            #
-            #     old_val = self.heap[i]
-            #     self.heap[i] = (new_val, self.heap[i][1])
-            #
-            #     if new_val > old_val[0]:
-            #         _siftup(self.heap, i)
-            #     else:
-            #         _siftdown(self.heap, 0, i)
+            for i in range(len(heap)):
+                new_val = abs(triangulation.interpolate_tin_linear(heap[i][1][0], heap[i][1][1]) - heap[i][1][2]) * -1
 
-            # try:
-            #     interpolated_value = triangulation.interpolate_tin_linear(largest_delta[1][0], largest_delta[1][1])
-            #
-            #     if interpolated_value > TRIANGULATION_THRESHOLD:
-            #         triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
-            #
-            # except OSError:
-            #     pass
-            #     # sys.stdout.write("Managed to find one outside CH\n")
-            #     # triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+                old_val = heap[i]
+                heap[i] = (new_val, heap[i][1])
 
+                if new_val > old_val[0]:
+                    _siftup(heap, i)
+                else:
+                    _siftdown(heap, 0, i)
 
-        for vertex in self.triangulation.all_vertices():
-            if vertex[0] > 0:  # Exclude infinite vertex
+        for vertex in triangulation.all_vertices():
+            if vertex[0] > 0:  # Exclude infinite vertex.
+                # self.stdout.put("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
                 sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+
+        # self.stdout.put(input_line)
+        sys.stdout.write(input_line)
 
         self.triangulations[grid_x][grid_y] = None
         self.grid_points[grid_x][grid_y] = None
@@ -224,8 +200,7 @@ class Processor:
 
         elif identifier == "x":
             # cell finalizer
-            self._triangulation.finalize(int(data[0]), int(data[1]))
-            sys.stdout.write(input_line)
+            self._triangulation.finalize(int(data[0]), int(data[1]), input_line)
 
             # threading.Thread(target=self._triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,)).start()
 
@@ -240,3 +215,4 @@ if __name__ == "__main__":
 
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
+
