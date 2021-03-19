@@ -3,16 +3,17 @@ import startin
 
 import numpy as np
 
-from heapq import heappush, heappop
+from heapq import heappop, heapify, _siftup, _siftdown
 from math import floor
 
 from scipy.spatial import KDTree
 
-TRIANGULATION_THRESHOLD = 1
+TRIANGULATION_THRESHOLD = 0.2
 
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
     return abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
+
 
 
 class Triangulation:
@@ -31,6 +32,9 @@ class Triangulation:
         self.max_y = None
 
         self.vertices = {}
+
+        self.heap = None
+        self.triangulation = None
 
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
@@ -67,50 +71,114 @@ class Triangulation:
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
 
+    def get_newest_max_abs(self, attempts=0):
+        if attempts > 100:
+            return heappop(self.heap)
+
+        try:
+            new_val = abs(self.triangulation.interpolate_tin_linear(self.heap[0][1][0], self.heap[0][1][1]) - self.heap[0][1][2]) * -1
+        except OSError:
+            return heappop(self.heap)
+
+        old_val = self.heap[0]
+        self.heap[0] = (new_val, self.heap[0][1])
+
+        if new_val > old_val[0]:
+            _siftup(self.heap, 0)
+        else:
+            _siftdown(self.heap, 0, 0)
+
+        # Check if largest abs is still the same point
+        if self.heap[0][1] != old_val[1]:
+            return self.get_newest_max_abs(attempts=attempts + 1)
+
+        try:
+            return heappop(self.heap)
+        except IndexError:
+            return 0
+
     def finalize(self, grid_x, grid_y):
-        heap = []
 
-        triangulation = startin.DT()
+        self.heap = []
 
-        tree = KDTree(self.grid_points[grid_x][grid_y], leafsize=2)
+        self.triangulation = startin.DT()
+
+        x_vals = []
+        y_vals = []
+
+        for point in self.grid_points[grid_x][grid_y]:
+            x_vals.append(point[0])
+            y_vals.append(point[1])
+
+        tree = KDTree(np.c_[x_vals, y_vals])
+
+        corner_points = [
+            [self.min_x + (self.cell_size * grid_x), self.min_y + (self.cell_size * grid_y)],
+            [self.min_x + (self.cell_size * grid_x) + self.cell_size - 1E-5, self.min_y + (self.cell_size * grid_y)],
+            [self.min_x + (self.cell_size * grid_x), self.min_y + (self.cell_size * grid_y) + self.cell_size - 1E-5],
+            [self.min_x + (self.cell_size * grid_x) + self.cell_size - 1E-5, self.min_y + (self.cell_size * grid_y) + self.cell_size - 1E-5]
+        ]
 
         near_corner_points = []
 
-        corner_points = [
-            [self.min_x * grid_x, self.min_y * grid_y, 0],
-            [self.min_x * grid_x + self.cell_size, self.min_y * grid_y, 0],
-            [self.min_x * grid_x, self.min_y * grid_y + self.cell_size, 0],
-            [self.min_x * grid_x + self.cell_size, self.min_y * grid_y + self.cell_size, 0]
-        ]
-
         for corner_point in corner_points:
             # Get nearest point to corner
-            distance, index = tree.query(corner_point, k=1)
+            distances, indexes = tree.query(corner_point, k=10)
 
-            print(distance, index)
+            z_vals = [self.grid_points[grid_x][grid_y][index][2] for index in indexes]
 
-            near_corner_points.append(self.grid_points[grid_x][grid_y][index])
+            # add a corner point with average z value of 10 nearest
+            near_corner_points.append([corner_point[0], corner_point[1], sum(z_vals) / len(z_vals)])
 
-        print(near_corner_points)
-
-        triangulation.insert(near_corner_points)
+        self.triangulation.insert(near_corner_points)
 
         if self.grid_points[grid_x][grid_y] is not None:
             for point in self.grid_points[grid_x][grid_y]:
 
-                print(point[0], point[1])
-
-                interpolated_value = triangulation.interpolate_tin_linear(point[0], point[1])
+                interpolated_value = self.triangulation.interpolate_tin_linear(point[0], point[1])
 
                 # Heap is min-based, so multiply by -1 to ensure max delta is at top
                 delta = abs(interpolated_value - point[2]) * -1
 
-                heappush(heap, (delta, point))
+                self.heap.append((delta, point))
 
-        print(heap)
+        heapify(self.heap)
 
-        if self.grid_points[grid_x][grid_y] is not None:
-            for vertex in self.grid_points[grid_x][grid_y]:
+        while True:
+
+            largest_delta = self.get_newest_max_abs()
+
+            if largest_delta[0] * -1 > TRIANGULATION_THRESHOLD:
+                self.triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+            else:
+                break
+
+            # Recalculate all in heap
+            # for i in range(len(self.heap)):
+            #     new_val = self.triangulation.interpolate_tin_linear(self.heap[i][1][0], self.heap[i][1][1]) * -1
+            #
+            #     old_val = self.heap[i]
+            #     self.heap[i] = (new_val, self.heap[i][1])
+            #
+            #     if new_val > old_val[0]:
+            #         _siftup(self.heap, i)
+            #     else:
+            #         _siftdown(self.heap, 0, i)
+
+            # try:
+            #     interpolated_value = triangulation.interpolate_tin_linear(largest_delta[1][0], largest_delta[1][1])
+            #
+            #     if interpolated_value > TRIANGULATION_THRESHOLD:
+            #         triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+            #
+            # except OSError:
+            #     pass
+            #     # sys.stdout.write("Managed to find one outside CH\n")
+            #     # triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
+
+
+        for vertex in self.triangulation.all_vertices():
+            if vertex[0] > 0:  # Exclude infinite vertex
                 sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         self.triangulations[grid_x][grid_y] = None
@@ -158,6 +226,8 @@ class Processor:
             # cell finalizer
             self._triangulation.finalize(int(data[0]), int(data[1]))
             sys.stdout.write(input_line)
+
+            # threading.Thread(target=self._triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,)).start()
 
         else:
             # Unknown identifier in stream
