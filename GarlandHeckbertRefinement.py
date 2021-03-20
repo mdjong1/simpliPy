@@ -1,5 +1,7 @@
+import collections
+import random
 import sys
-from heapq import _siftup, _siftdown, _heappop_max
+from heapq import _siftup, _siftdown
 
 import startin
 
@@ -13,10 +15,26 @@ from scipy.spatial import KDTree
 
 TRIANGULATION_THRESHOLD = 0.2
 
+
+def shift_right(input_list):
+    collection = collections.deque(input_list)
+    collection.rotate(1)
+    return list(collection)
+
+
 class Triangle:
-    def __init__(self, vertices):
-        self.vertices = vertices
-        self.points = {}
+    def __init__(self):
+        self.vertices = {}
+        self.points = []
+
+        self.point_index = -1
+        self.max_error = 0
+
+    def __lt__(self, other):
+        return self.max_error < other.max_error
+
+    def __str__(self):
+        return str(self.point_index) + " " + str(self.max_error)
 
 
 class Triangulation:
@@ -86,39 +104,37 @@ class Triangulation:
 
         return near_corner_points
 
-    def heap_update(self, max_error, index, triangle):
-        old_val = self.heap[index]
-        self.heap[index] = (max_error, self.heap[index][1], triangle)
+    def heap_update(self, max_error, local_index, triangle):
+        if max_error == self.heap[local_index].max_error:
+            return
+
+        old_val, self.heap[local_index] = self.heap[local_index], triangle
 
         if max_error > old_val[0]:
-            _siftup(self.heap, index)
+            _siftup(self.heap, local_index)
         else:
-            _siftdown(self.heap, 0, index)
+            _siftdown(self.heap, 0, local_index)
 
-    def heap_change(self, max_error, index, triangle):
+    def heap_change(self, triangle):
+        heappush(self.heap, triangle)
 
-        if index <= len(self.heap):
-            self.heap_update(max_error * -1, index, triangle)
-        else:
-            heappush(self.heap, (max_error * -1, index, triangle))
+    def scan_triangle(self, triangulation, input_triangle, points):
 
-    def initial_scan_triangle(self, triangulation, triangle, all_points):
         best = None
         max_error = 0
 
-        output_triangle = Triangle(triangle)
+        output_triangle = Triangle()
+        output_triangle.points = input_triangle
 
-        for i in range(len(all_points)):
-            point = all_points[i]
+        for i in points:
+            point = points[i]
 
-            # TODO: Remember in which triangle a point is and keep that knowledge; only update if it is in a split triangle
             in_triangle = triangulation.locate(point[0], point[1])
 
-            is_inside_triangle = all(item in triangle for item in in_triangle)
+            is_inside_triangle = all(item in input_triangle for item in in_triangle)
 
             if is_inside_triangle:
-
-                output_triangle.points[i] = point
+                output_triangle.vertices[i] = point
 
                 error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
 
@@ -127,53 +143,36 @@ class Triangulation:
                     best = i
 
         if best is not None:
-            self.heap_change(max_error, best, output_triangle)
+            del output_triangle.vertices[best]
 
-    def scan_triangle(self, triangulation, input_triangle):
-        best = None
-        max_error = 0
+            output_triangle.max_error = max_error * -1
+            output_triangle.point_index = best
 
-        output_triangle = Triangle(input_triangle.vertices)
-
-        for i in input_triangle.points:
-            point = input_triangle.points[i]
-
-            in_triangle = triangulation.locate(point[0], point[1])
-
-            is_inside_triangle = all(item in input_triangle.vertices for item in in_triangle)
-
-            if is_inside_triangle:
-                output_triangle.points[i] = point
-
-                error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
-
-                if error > max_error:
-                    max_error = error
-                    best = i
-
-        if best is not None:
-            self.heap_change(max_error, best, output_triangle)
+            self.heap_change(output_triangle)
 
     def insert(self, triangulation, all_points, max_abs):
-        index = max_abs[1]
+        index = max_abs.point_index
 
         triangulation.insert_one_pt(all_points[index][0], all_points[index][1], all_points[index][2], 0)
 
-        containing_triangle = triangulation.locate(all_points[index][0], all_points[index][1])
+        nearest_vertex = triangulation.closest_point(all_points[index][0], all_points[index][1])
 
-        adjacent_triangles = triangulation.adjacent_triangles_to_triangle(containing_triangle)
+        adjacent_triangles = triangulation.incident_triangles_to_vertex(nearest_vertex)
 
-        # FIXME: Get triangle object for adjacents instead of triangle vertex pointers
         if adjacent_triangles is not None:
             for triangle in adjacent_triangles:
-                self.scan_triangle(triangulation, triangle)
+                self.scan_triangle(triangulation, triangle, max_abs.vertices)
 
     def finalize(self, grid_x, grid_y, input_line):
-        all_points = self.grid_points[grid_x][grid_y]
+        all_points = {}
+        points_in_cell = self.grid_points[grid_x][grid_y]
 
-        if len(all_points) == 0:
+        if points_in_cell is None or len(points_in_cell) == 0:
             sys.stdout.write(input_line)
             return
+
+        for i in range(len(points_in_cell)):
+            all_points[i] = points_in_cell[i]
 
         corner_points = self.get_corner_points(grid_x, grid_y)
 
@@ -183,14 +182,12 @@ class Triangulation:
         triangulation.insert(corner_points)
 
         for triangle in triangulation.all_triangles():
-            self.initial_scan_triangle(triangulation, triangle, all_points)
+            self.scan_triangle(triangulation, triangle, all_points)
 
         while True:
             max_abs = heappop(self.heap)
 
-            print(max_abs)
-
-            if max_abs[0] * -1 < TRIANGULATION_THRESHOLD:
+            if max_abs.max_error * -1 < TRIANGULATION_THRESHOLD:
                 break
 
             self.insert(triangulation, all_points, max_abs)
@@ -202,6 +199,8 @@ class Triangulation:
                 sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         sys.stdout.write(input_line)
+
+        triangulation.write_geojson_triangles("3-19-21\\after_refinement" + str(random.randint(0, 10000)) + ".json")
 
 
 class Processor:
