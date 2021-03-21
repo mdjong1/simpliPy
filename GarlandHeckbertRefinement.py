@@ -1,31 +1,30 @@
 import collections
 import random
 import sys
-from heapq import _siftup, _siftdown
+import time
 
 import startin
 
 import numpy as np
 
 from math import floor
-
+from scipy.spatial import KDTree
 from heapq import *
 
-from scipy.spatial import KDTree
 
 TRIANGULATION_THRESHOLD = 0.2
 
 
-def shift_right(input_list):
+def shift_left(input_list):
     collection = collections.deque(input_list)
-    collection.rotate(1)
+    collection.rotate(-1)
     return list(collection)
 
 
 class Triangle:
     def __init__(self):
         self.vertices = {}
-        self.points = []
+        self.triangle_vertex_ids = []
 
         self.point_index = -1
         self.max_error = 0
@@ -34,7 +33,7 @@ class Triangle:
         return self.max_error < other.max_error
 
     def __str__(self):
-        return str(self.point_index) + " " + str(self.max_error)
+        return str("max index: " + str(self.point_index) + ", max error: " + str(-self.max_error) + ", len vertices: " + str(len(self.vertices)))
 
 
 class Triangulation:
@@ -84,6 +83,7 @@ class Triangulation:
 
         tree = KDTree(np.c_[x_vals, y_vals])
 
+        # Determine 4 corner points for this grid cell to initialize triangulation
         corner_points = [
             [self.min_x + (self.cell_size * grid_x), self.min_y + (self.cell_size * grid_y)],
             [self.min_x + (self.cell_size * grid_x) + self.cell_size - 1E-5, self.min_y + (self.cell_size * grid_y)],
@@ -94,45 +94,41 @@ class Triangulation:
         near_corner_points = []
 
         for corner_point in corner_points:
-            # Get nearest point to corner
+            # Get nearest k points to corner points
             distances, indexes = tree.query(corner_point, k=10)
 
             z_vals = [self.grid_points[grid_x][grid_y][index][2] for index in indexes]
 
-            # add a corner point with average z value of 10 nearest
+            # Add a corner point with average z value of k nearest
             near_corner_points.append([corner_point[0], corner_point[1], sum(z_vals) / len(z_vals)])
+
+        del tree
+        del x_vals
+        del y_vals
+        del z_vals
 
         return near_corner_points
 
-    def heap_update(self, max_error, local_index, triangle):
-        if max_error == self.heap[local_index].max_error:
-            return
-
-        old_val, self.heap[local_index] = self.heap[local_index], triangle
-
-        if max_error > old_val[0]:
-            _siftup(self.heap, local_index)
-        else:
-            _siftdown(self.heap, 0, local_index)
-
-    def heap_change(self, triangle):
-        heappush(self.heap, triangle)
-
     def scan_triangle(self, triangulation, input_triangle, points):
-
         best = None
         max_error = 0
 
+        # Create a new Triangle for in the heap and set the vertex indexes that define this triangle
         output_triangle = Triangle()
-        output_triangle.points = input_triangle
+        output_triangle.triangle_vertex_ids = input_triangle
 
+        # The points we have are from the old triangle, after inserting a point we need to find which are in the new one
+        # and determine the point of maximum error within this triangle
         for i in points:
             point = points[i]
 
             in_triangle = triangulation.locate(point[0], point[1])
 
-            is_inside_triangle = all(item in input_triangle for item in in_triangle)
+            # Triangle ordering may be different;
+            # check if all points are in both lists [1, 2, 3] == [3, 1, 2] == [2, 3, 1]
+            is_inside_triangle = all(vertex in input_triangle for vertex in in_triangle)
 
+            # Assign each point that is within the new triangle to the new triangle and check if its error is largest
             if is_inside_triangle:
                 output_triangle.vertices[i] = point
 
@@ -143,25 +139,23 @@ class Triangulation:
                     best = i
 
         if best is not None:
-            del output_triangle.vertices[best]
-
-            output_triangle.max_error = max_error * -1
+            # Push worst abs vertex to triangle & heap
+            output_triangle.max_error = -max_error
             output_triangle.point_index = best
 
-            self.heap_change(output_triangle)
+            heappush(self.heap, output_triangle)
+        # else:
+        #     print("Rejecting " + str(input_triangle) + " because no 'inside triangle' found! " + str(len(points)))
 
-    def insert(self, triangulation, all_points, max_abs):
-        index = max_abs.point_index
+    def insert(self, triangulation, index, vertices):
+        vertex_id = triangulation.insert_one_pt(vertices[index][0], vertices[index][1], vertices[index][2], 0)
 
-        triangulation.insert_one_pt(all_points[index][0], all_points[index][1], all_points[index][2], 0)
+        incident_triangles = triangulation.incident_triangles_to_vertex(vertex_id)
 
-        nearest_vertex = triangulation.closest_point(all_points[index][0], all_points[index][1])
-
-        adjacent_triangles = triangulation.incident_triangles_to_vertex(nearest_vertex)
-
-        if adjacent_triangles is not None:
-            for triangle in adjacent_triangles:
-                self.scan_triangle(triangulation, triangle, max_abs.vertices)
+        # If there is only 1 point in this triangle, then no need to continue search as max granularity is reached
+        if incident_triangles is not None and len(vertices) > 1:
+            for triangle in incident_triangles:
+                self.scan_triangle(triangulation, triangle, vertices)
 
     def finalize(self, grid_x, grid_y, input_line):
         all_points = {}
@@ -181,16 +175,20 @@ class Triangulation:
         # Insert 4 corner points into triangulation
         triangulation.insert(corner_points)
 
+        # Get largest delta for initial 2 triangles and push to heap
         for triangle in triangulation.all_triangles():
             self.scan_triangle(triangulation, triangle, all_points)
 
-        while True:
+        while self.heap:
+            # Get largest delta from heap
             max_abs = heappop(self.heap)
 
-            if max_abs.max_error * -1 < TRIANGULATION_THRESHOLD:
+            # If below threshold, we're done!
+            if -max_abs.max_error < TRIANGULATION_THRESHOLD:
                 break
 
-            self.insert(triangulation, all_points, max_abs)
+            # If not below threshold, insert it and add delta's for each incident triangle to heap
+            self.insert(triangulation, max_abs.point_index, max_abs.vertices)
 
         self.heap = []
 
@@ -199,8 +197,6 @@ class Triangulation:
                 sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         sys.stdout.write(input_line)
-
-        triangulation.write_geojson_triangles("3-19-21\\after_refinement" + str(random.randint(0, 10000)) + ".json")
 
 
 class Processor:
