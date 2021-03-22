@@ -1,8 +1,5 @@
 import collections
-import random
 import sys
-import time
-
 import startin
 
 import numpy as np
@@ -117,6 +114,9 @@ class Triangulation:
         output_triangle = Triangle()
         output_triangle.triangle_vertex_ids = input_triangle
 
+        # Adjacent triangles may also include relevant points because of flipping
+        adjacent_triangles = triangulation.adjacent_triangles_to_triangle(input_triangle)
+
         # The points we have are from the old triangle, after inserting a point we need to find which are in the new one
         # and determine the point of maximum error within this triangle
         for i in points:
@@ -130,6 +130,7 @@ class Triangulation:
 
             # Assign each point that is within the new triangle to the new triangle and check if its error is largest
             if is_inside_triangle:
+
                 output_triangle.vertices[i] = point
 
                 error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
@@ -137,6 +138,14 @@ class Triangulation:
                 if error > max_error:
                     max_error = error
                     best = i
+            else:
+                for adjacent_triangle in adjacent_triangles:
+
+                    is_inside_triangle = all(vertex in adjacent_triangle for vertex in in_triangle)
+
+                    if is_inside_triangle:
+                        output_triangle.vertices[i] = point
+                        break
 
         if best is not None:
             # Push worst abs vertex to triangle & heap
@@ -144,8 +153,6 @@ class Triangulation:
             output_triangle.point_index = best
 
             heappush(self.heap, output_triangle)
-        # else:
-        #     print("Rejecting " + str(input_triangle) + " because no 'inside triangle' found! " + str(len(points)))
 
     def insert(self, triangulation, index, vertices):
         vertex_id = triangulation.insert_one_pt(vertices[index][0], vertices[index][1], vertices[index][2], 0)
