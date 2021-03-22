@@ -6,7 +6,7 @@ import numpy as np
 from math import floor
 
 
-TRIANGULATION_THRESHOLD = 1
+TRIANGULATION_THRESHOLD = 0.2
 
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -60,37 +60,58 @@ class Triangulation:
         self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
         self.triangulations = np.empty(shape=(grid_size, grid_size), dtype=object)
 
-    def insert_point(self, x, y, z, grid_cell):
+    def insert_point(self, x, y, z, grid_cell, write_vertex):
         if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
-            self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
+            self.grid_points[grid_cell[0]][grid_cell[1]].append([write_vertex, x, y, z])
         else:
-            self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
+            self.grid_points[grid_cell[0]][grid_cell[1]] = [[write_vertex, x, y, z]]
 
-        self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z, 0)
+        if write_vertex:
+            self.triangulations[grid_cell[0]][grid_cell[1]].insert_one_pt(x, y, z, 0)
 
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
+
+        write_vertex = False
 
         # Always include points on outer bbox
         if is_almost(x, self.min_x, abs_tol=0.0001) or is_almost(x, self.max_x, abs_tol=0.001) or \
                 is_almost(y, self.min_y, abs_tol=0.001) or is_almost(y, self.max_y, abs_tol=0.001):
 
-            self.insert_point(x, y, z, grid_cell)
+            write_vertex = True
 
         else:
             interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_tin_linear(x, y)
 
             if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
-                sys.stderr.write("{} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
-                self.insert_point(x, y, z, grid_cell)
+                # sys.stderr.write("1: {} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
+
+                write_vertex = True
+
+        self.insert_point(x, y, z, grid_cell, write_vertex)
 
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
 
     def finalize(self, grid_x, grid_y):
         if self.grid_points[grid_x][grid_y] is not None:
+
             for vertex in self.grid_points[grid_x][grid_y]:
-                sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+                if vertex[0] is False:
+
+                    x = vertex[1]
+                    y = vertex[2]
+                    z = vertex[3]
+
+                    interpolated_value = self.triangulations[grid_x][grid_y].interpolate_tin_linear(x, y)
+
+                    if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
+                        sys.stderr.write("2: {} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
+                        self.insert_point(x, y, z, [grid_x, grid_y], write_vertex=True)
+
+            for vertex in self.grid_points[grid_x][grid_y]:
+                if vertex[0] is True:
+                    sys.stdout.write("v " + str(vertex[1]) + " " + str(vertex[2]) + " " + str(vertex[3]) + "\n")
 
         self.triangulations[grid_x][grid_y] = None
         self.grid_points[grid_x][grid_y] = None
@@ -141,6 +162,8 @@ class Processor:
         else:
             # Unknown identifier in stream
             pass
+
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
