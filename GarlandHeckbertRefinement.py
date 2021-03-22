@@ -1,5 +1,7 @@
 import collections
 import sys
+import threading
+
 import startin
 
 import numpy as np
@@ -106,7 +108,7 @@ class Triangulation:
 
         return near_corner_points
 
-    def scan_triangle(self, triangulation, input_triangle, points):
+    def scan_triangle(self, triangulation, heap, input_triangle, points):
         best = None
         max_error = 0
 
@@ -130,7 +132,6 @@ class Triangulation:
 
             # Assign each point that is within the new triangle to the new triangle and check if its error is largest
             if is_inside_triangle:
-
                 output_triangle.vertices[i] = point
 
                 error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
@@ -139,6 +140,7 @@ class Triangulation:
                     max_error = error
                     best = i
             else:
+                # Check if a point exists in an adjacent triangle as this point may be relevant after a flip operation
                 for adjacent_triangle in adjacent_triangles:
 
                     is_inside_triangle = all(vertex in adjacent_triangle for vertex in in_triangle)
@@ -152,17 +154,20 @@ class Triangulation:
             output_triangle.max_error = -max_error
             output_triangle.point_index = best
 
-            heappush(self.heap, output_triangle)
+            heappush(heap, output_triangle)
 
-    def insert(self, triangulation, index, vertices):
+    def insert(self, triangulation, heap, index, vertices):
         vertex_id = triangulation.insert_one_pt(vertices[index][0], vertices[index][1], vertices[index][2], 0)
 
         incident_triangles = triangulation.incident_triangles_to_vertex(vertex_id)
 
+        # Inserted this point, no need to keep it in our list of vertices for later triangles
+        del vertices[index]
+
         # If there is only 1 point in this triangle, then no need to continue search as max granularity is reached
         if incident_triangles is not None and len(vertices) > 1:
             for triangle in incident_triangles:
-                self.scan_triangle(triangulation, triangle, vertices)
+                self.scan_triangle(triangulation, heap, triangle, vertices)
 
     def finalize(self, grid_x, grid_y, input_line):
         all_points = {}
@@ -179,25 +184,28 @@ class Triangulation:
 
         triangulation = startin.DT()
 
+        heap = []
+
         # Insert 4 corner points into triangulation
         triangulation.insert(corner_points)
 
         # Get largest delta for initial 2 triangles and push to heap
         for triangle in triangulation.all_triangles():
-            self.scan_triangle(triangulation, triangle, all_points)
+            self.scan_triangle(triangulation, heap, triangle, all_points)
 
-        while self.heap:
+        while heap:
             # Get largest delta from heap
-            max_abs = heappop(self.heap)
+            max_abs = heappop(heap)
+
+            sys.stdout.write(str(max_abs) + "\n")
+            sys.stdout.flush()
 
             # If below threshold, we're done!
             if -max_abs.max_error < TRIANGULATION_THRESHOLD:
                 break
 
             # If not below threshold, insert it and add delta's for each incident triangle to heap
-            self.insert(triangulation, max_abs.point_index, max_abs.vertices)
-
-        self.heap = []
+            self.insert(triangulation, heap, max_abs.point_index, max_abs.vertices)
 
         for vertex in triangulation.all_vertices():
             if vertex[0] > 0:
@@ -208,7 +216,8 @@ class Triangulation:
 
 class Processor:
     def __init__(self, dt):
-        self._triangulation = dt
+        self.triangulation = dt
+        self.threads = []
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
@@ -221,31 +230,35 @@ class Processor:
 
         elif identifier == "n":
             # Total number of points
-            self._triangulation.total_points = int(data[0])
+            self.triangulation.total_points = int(data[0])
             sys.stdout.write(input_line)
 
         elif identifier == "c":
             # Grid dimensions (cXc)
-            self._triangulation.initialize_grid(int(data[0]))
+            self.triangulation.initialize_grid(int(data[0]))
             sys.stdout.write(input_line)
 
         elif identifier == "s":
             # Cell size
-            self._triangulation.cell_size = int(data[0])
+            self.triangulation.cell_size = int(data[0])
             sys.stdout.write(input_line)
 
         elif identifier == "b":
             # bbox
-            self._triangulation.set_bbox(float(data[0]), float(data[1]), float(data[2]), float(data[3]))
+            self.triangulation.set_bbox(float(data[0]), float(data[1]), float(data[2]), float(data[3]))
             sys.stdout.write(input_line)
 
         elif identifier == "v":
             # vertex
-            self._triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
+            self.triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
 
         elif identifier == "x":
             # cell finalizer
-            self._triangulation.finalize(int(data[0]), int(data[1]), input_line)
+            # self.triangulation.finalize(int(data[0]), int(data[1]), input_line)
+
+            thread = threading.Thread(target=self.triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,), daemon=True)
+            self.threads.append(thread)
+            thread.start()
 
         else:
             # Unknown identifier in stream
@@ -258,4 +271,7 @@ if __name__ == "__main__":
 
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
+
+    for thread in processor.threads:
+        thread.join()
 
