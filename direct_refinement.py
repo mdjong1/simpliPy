@@ -6,7 +6,8 @@ import numpy as np
 from math import floor
 
 
-TRIANGULATION_THRESHOLD = 0.2
+COARSE_THRESHOLD = 1
+FINE_THRESHOLD = 0.2
 
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -83,7 +84,7 @@ class Triangulation:
         else:
             interpolated_value = self.triangulations[grid_cell[0]][grid_cell[1]].interpolate_tin_linear(x, y)
 
-            if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
+            if abs(interpolated_value - z) > COARSE_THRESHOLD:
                 # sys.stderr.write("1: {} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
 
                 write_vertex = True
@@ -105,8 +106,8 @@ class Triangulation:
 
                     interpolated_value = self.triangulations[grid_x][grid_y].interpolate_tin_linear(x, y)
 
-                    if abs(interpolated_value - z) > TRIANGULATION_THRESHOLD:
-                        sys.stderr.write("2: {} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
+                    if abs(interpolated_value - z) > FINE_THRESHOLD:
+                        # sys.stderr.write("2: {} - {} = {}\n".format(interpolated_value, z, abs(interpolated_value - z)))
                         self.insert_point(x, y, z, [grid_x, grid_y], write_vertex=True)
 
             for vertex in self.grid_points[grid_x][grid_y]:
