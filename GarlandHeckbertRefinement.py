@@ -33,7 +33,7 @@ class Triangle:
         return self.max_error < other.max_error
 
     def __str__(self):
-        return str("max index: " + str(self.point_index) + ", max error: " + str(-self.max_error) + ", len vertices: " + str(len(self.vertices)))
+        return str("max index: " + str(self.point_index) + ", error: " + str(-self.max_error) + ", len vertices: " + str(len(self.vertices)))
 
 
 class Triangulation:
