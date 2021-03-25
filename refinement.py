@@ -118,8 +118,7 @@ class Triangulation:
         heapify(heap)
 
         while True:
-
-            sys.stdout.write("{}\n".format(len(heap)))
+            # sys.stdout.write("{}\n".format(len(heap)))
 
             try:
                 largest_delta = heappop(heap)
@@ -137,17 +136,18 @@ class Triangulation:
                 # sys.stdout.write("Managed to find one outside CH\n")
                 # triangulation.insert_one_pt(largest_delta[1][0], largest_delta[1][1], largest_delta[1][2], 0)
 
-            # Recalculate all in heap
-            for i in range(len(heap)):
-                new_val = abs(triangulation.interpolate_tin_linear(heap[i][1][0], heap[i][1][1]) - heap[i][1][2]) * -1
+            # For every 10 points; recalculate the entire heap's errors
+            if len(heap) % 10 == 0:
+                for i in range(len(heap)):
+                    new_val = abs(triangulation.interpolate_tin_linear(heap[i][1][0], heap[i][1][1]) - heap[i][1][2]) * -1
 
-                old_val = heap[i]
-                heap[i] = (new_val, heap[i][1])
+                    old_val = heap[i]
+                    heap[i] = (new_val, heap[i][1])
 
-                if new_val > old_val[0]:
-                    _siftup(heap, i)
-                else:
-                    _siftdown(heap, 0, i)
+                    if new_val > old_val[0]:
+                        _siftup(heap, i)
+                    else:
+                        _siftdown(heap, 0, i)
 
         for vertex in triangulation.all_vertices():
             if vertex[0] > 0:  # Exclude infinite vertex.
@@ -164,6 +164,8 @@ class Triangulation:
 class Processor:
     def __init__(self, dt):
         self._triangulation = dt
+
+        self.threads = []
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
@@ -200,13 +202,17 @@ class Processor:
 
         elif identifier == "x":
             # cell finalizer
-            self._triangulation.finalize(int(data[0]), int(data[1]), input_line)
+            # self._triangulation.finalize(int(data[0]), int(data[1]), input_line)
 
-            # threading.Thread(target=self._triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,)).start()
+            thread = threading.Thread(target=self._triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,), daemon=True)
+            self.threads.append(thread)
+            thread.start()
 
         else:
             # Unknown identifier in stream
             pass
+
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
@@ -216,3 +222,5 @@ if __name__ == "__main__":
     for stdin_line in sys.stdin.readlines():
         processor.process_line(stdin_line)
 
+    for thread in processor.threads:
+        thread.join()
