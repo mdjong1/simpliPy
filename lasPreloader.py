@@ -34,6 +34,9 @@ offset = {
 }
 
 
+sys.stdout.write("offset {} {} {}\n".format(offset[0], offset[1], offset[2]))
+
+
 las2txt = subprocess.Popen(["thirdparty\\lastools\\las2txt", "-drop_class", "3", "4", "5", "-i", input_file, "-stdout"], stdout=subprocess.PIPE)
 
 for line in las2txt.stdout:
@@ -45,5 +48,5 @@ for line in las2txt.stdout:
     y = round(split_line[1] - offset[1], 4)
     z = round(split_line[2] - offset[2], 4)
 
-    sys.stdout.write(str(x) + " " + str(y) + " " + str(z) + "\n")
+    sys.stdout.write("{} {} {}\n".format(x, y, z))
 
