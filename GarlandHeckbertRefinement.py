@@ -134,11 +134,15 @@ class Triangulation:
             if is_inside_triangle:
                 output_triangle.vertices[i] = point
 
-                error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
+                try:
+                    error = abs(point[2] - triangulation.interpolate_tin_linear(point[0], point[1]))
 
-                if error > max_error:
-                    max_error = error
-                    best = i
+                    if error > max_error:
+                        max_error = error
+                        best = i
+                except:
+                    pass
+
             else:
                 # Check if a point exists in an adjacent triangle as this point may be relevant after a flip operation
                 for adjacent_triangle in adjacent_triangles:
