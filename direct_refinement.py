@@ -7,6 +7,7 @@ import numpy as np
 
 from math import floor
 from multiprocessing import cpu_count, Process
+from scipy.spatial import KDTree
 
 COARSE_THRESHOLD = 1
 FINE_THRESHOLD = 0.2
@@ -42,34 +43,16 @@ class Triangulation:
         self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
         self.initial_points = np.empty(shape=(grid_size, grid_size), dtype=object)
 
-    def insert_point(self, x, y, z, grid_cell, write_vertex):
+    def insert_point(self, x, y, z, grid_cell):
         if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
             self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
         else:
             self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
 
-        if write_vertex:
-            if type(self.initial_points[grid_cell[0]][grid_cell[1]]) == list:
-                self.initial_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
-            else:
-                self.initial_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
-
-
-
     def insert_point_in_grid(self, x, y, z):
         grid_cell = self.get_cell(x, y)
 
-        write_vertex = False
-
-        # Always include points on outer bbox
-        if is_almost(x, self.min_x + grid_cell[0] * self.cell_size, abs_tol=0.001) or \
-                is_almost(x, self.min_x + grid_cell[0] * self.cell_size + self.cell_size, abs_tol=0.001) or \
-                is_almost(y, self.min_y + grid_cell[1] * self.cell_size, abs_tol=0.001) or \
-                is_almost(y, self.max_y + grid_cell[1] * self.cell_size + self.cell_size, abs_tol=0.001):
-
-            write_vertex = True
-
-        self.insert_point(x, y, z, grid_cell, write_vertex)
+        self.insert_point(x, y, z, grid_cell)
 
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
@@ -80,24 +63,34 @@ class Triangulation:
 
             triangulation = startin.DT()
 
-            # if self.initial_points[grid_x][grid_y] is not None:
-            #     triangulation.insert(self.initial_points[grid_x][grid_y])
-            #
-            #     self.initial_points[grid_x][grid_y] = None
+            x_vals = []
+            y_vals = []
 
-            # Apparently not enough border points so creating artificial ones..
-            if triangulation.number_of_vertices() < 4:
-                x = self.min_x + grid_x * self.cell_size
-                y = self.min_y + grid_y * self.cell_size
+            for point in self.grid_points[grid_x][grid_y]:
+                x_vals.append(point[0])
+                y_vals.append(point[1])
 
-                initial_points = [
-                    [x, y, 0],
-                    [x + self.cell_size, y, 0],
-                    [x, y + self.cell_size, 0],
-                    [x + self.cell_size, y + self.cell_size, 0]
-                ]
+            tree = KDTree(np.c_[x_vals, y_vals])
 
-                triangulation.insert(initial_points)
+            corner_points = [
+                [self.min_x + (self.cell_size * grid_x), self.min_y + (self.cell_size * grid_y)],
+                [self.min_x + (self.cell_size * grid_x) + self.cell_size - 1E-5, self.min_y + (self.cell_size * grid_y)],
+                [self.min_x + (self.cell_size * grid_x), self.min_y + (self.cell_size * grid_y) + self.cell_size - 1E-5],
+                [self.min_x + (self.cell_size * grid_x) + self.cell_size - 1E-5, self.min_y + (self.cell_size * grid_y) + self.cell_size - 1E-5]
+            ]
+
+            near_corner_points = []
+
+            for corner_point in corner_points:
+                # Get nearest point to corner
+                distances, indexes = tree.query(corner_point, k=10)
+
+                z_vals = [self.grid_points[grid_x][grid_y][index][2] for index in indexes]
+
+                # add a corner point with average z value of 10 nearest
+                near_corner_points.append([corner_point[0], corner_point[1], sum(z_vals) / len(z_vals)])
+
+            triangulation.insert(near_corner_points)
 
             for vertex in self.grid_points[grid_x][grid_y]:
                     x = vertex[0]
