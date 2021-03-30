@@ -32,6 +32,9 @@ class Triangulation:
         self.max_x = None
         self.max_y = None
 
+        self.vertices = {}
+        self.vertex_id = 1
+
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
         self.min_y = min_y
@@ -43,32 +46,38 @@ class Triangulation:
         self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
         self.initial_points = np.empty(shape=(grid_size, grid_size), dtype=object)
 
-    def insert_point(self, x, y, z, grid_cell):
-        if type(self.grid_points[grid_cell[0]][grid_cell[1]]) == list:
-            self.grid_points[grid_cell[0]][grid_cell[1]].append([x, y, z])
+    def insert_point(self, x, y, z, grid_x, grid_y):
+        if type(self.grid_points[grid_x][grid_y]) == list:
+            self.grid_points[grid_x][grid_y].append([x, y, z])
         else:
-            self.grid_points[grid_cell[0]][grid_cell[1]] = [[x, y, z]]
+            self.grid_points[grid_x][grid_y] = [[x, y, z]]
 
     def insert_point_in_grid(self, x, y, z):
-        grid_cell = self.get_cell(x, y)
+        grid_x, grid_y = self.get_cell(x, y)
 
-        self.insert_point(x, y, z, grid_cell)
+        self.insert_point(x, y, z, grid_x, grid_y)
+
+    def insert_vertex(self, x, y, z):
+        self.vertices[self.vertex_id] = [x, y, z]
+        self.vertex_id += 1
 
     def get_cell(self, x, y):
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
 
-    def finalize(self, grid_x, grid_y, input_line):
+    def finalize(self, input_line, grid_x, grid_y, vertices):
 
-        if self.grid_points[grid_x][grid_y] is not None:
+        if len(vertices) > 0:
 
             triangulation = startin.DT()
 
             x_vals = []
             y_vals = []
+            z_vals = []
 
-            for point in self.grid_points[grid_x][grid_y]:
+            for vertex_id, point in vertices.items():
                 x_vals.append(point[0])
                 y_vals.append(point[1])
+                z_vals.append(point[2])
 
             tree = KDTree(np.c_[x_vals, y_vals])
 
@@ -85,33 +94,55 @@ class Triangulation:
                 # Get nearest point to corner
                 distances, indexes = tree.query(corner_point, k=10)
 
-                z_vals = [self.grid_points[grid_x][grid_y][index][2] for index in indexes]
+                queried_z_vals = [z_vals[index] for index in indexes]
 
                 # add a corner point with average z value of 10 nearest
-                near_corner_points.append([corner_point[0], corner_point[1], sum(z_vals) / len(z_vals)])
+                near_corner_points.append([corner_point[0], corner_point[1], sum(queried_z_vals) / len(queried_z_vals)])
 
             triangulation.insert(near_corner_points)
 
-            for vertex in self.grid_points[grid_x][grid_y]:
-                    x = vertex[0]
-                    y = vertex[1]
-                    z = vertex[2]
+            to_delete = []
 
-                    try:
-                        interpolated_value = triangulation.interpolate_tin_linear(x, y)
+            for key, vertex in vertices.items():
+                x = vertex[0]
+                y = vertex[1]
+                z = vertex[2]
 
-                        if abs(interpolated_value - z) > COARSE_THRESHOLD:
-                            triangulation.insert_one_pt(x, y, z, 0)
+                try:
+                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
 
-                    except OSError:
-                        pass
+                    if abs(interpolated_value - z) > COARSE_THRESHOLD:
+                        triangulation.insert_one_pt(x, y, z, 0)
+                        to_delete.append(key)
+
+                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
+                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
+                except OSError:
+                    pass
+
+            for key in reversed(to_delete):
+                del vertices[key]
+
+            for key, vertex in vertices.items():
+                x = vertex[0]
+                y = vertex[1]
+                z = vertex[2]
+
+                try:
+                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
+
+                    if abs(interpolated_value - z) > FINE_THRESHOLD:
+                        triangulation.insert_one_pt(x, y, z, 0)
+
+                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
+                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
+                except OSError:
+                    pass
 
             for vertex in triangulation.all_vertices():
                 # Don't print infinite vertex
                 if vertex[0] > 0:
                     sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
-
-            self.grid_points[grid_x][grid_y] = None
 
         sys.stdout.write(input_line)
         sys.stdout.flush()
@@ -120,6 +151,7 @@ class Triangulation:
 class Processor:
     def __init__(self, dt):
         self.triangulation = dt
+        self.sprinkling = True
 
         self.processes = []
 
@@ -139,7 +171,7 @@ class Processor:
 
         elif identifier == "c":
             # Grid dimensions (cXc)
-            self.triangulation.initialize_grid(int(data[0]))
+            # self.triangulation.initialize_grid(int(data[0]))
             sys.stdout.write(input_line)
 
         elif identifier == "s":
@@ -153,28 +185,46 @@ class Processor:
             sys.stdout.write(input_line)
 
         elif identifier == "v":
+            # Stupid hack because output didn't include an end sprinkle indicator
+            # TODO: Replace when sstfin includes #endsprinkle indicator
+            if float(data[0]) == 80396.714 and float(data[1]) == 444149.420 and float(data[2]) == -2.340:
+                self.sprinkling = False
+                sys.stderr.write("Sprinkling done!\n")
+
             # vertex
-            self.triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
+            # self.triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
+            if not self.sprinkling:
+                self.triangulation.insert_vertex(float(data[0]), float(data[1]), float(data[2]))
+
+            else:
+                sys.stdout.write(input_line)
 
         elif identifier == "x":
             # cell finalizer
 
+            # sys.stderr.write("Finalizing: {}\n".format(data))
+            # self.triangulation.finalize(input_line, int(data[0]), int(data[1]))
+
+            if self.sprinkling:
+                sys.stdout.write(input_line)
+                return
+
             sys.stderr.write("Starting new process to finalize: {}. Processing currently running: {}\n".format(data, len(self.processes)))
             sys.stderr.flush()
 
-            sleep_time = 0.01
+            sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= cpu_count() - 4:
+            while len(self.processes) >= cpu_count() / 2:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
 
-                # Incremental sleep timer
                 time.sleep(sleep_time)
-                sleep_time *= 1.5
 
-            process = Process(target=self.triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,))
+            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices))
+            self.triangulation.vertices = {}
+            self.triangulation.vertex_id = 1
             self.processes.append(process)
             process.start()
 
