@@ -1,6 +1,6 @@
 import sys
 import time
-from heapq import heapify, heappop
+from heapq import heapify, heappop, _siftup, _siftdown
 
 import startin
 
@@ -10,8 +10,8 @@ from math import floor
 from multiprocessing import cpu_count, Process
 from scipy.spatial import KDTree
 
-COARSE_THRESHOLD = 3
-FINE_THRESHOLD = 0.3
+COARSE_THRESHOLD = 2
+FINE_THRESHOLD = 0.2
 
 # 37EN1 - 2m - 0.2m (6 threads)
 # START TIME: 2021-04-06T09:34:35
@@ -173,11 +173,13 @@ class Triangulation:
                 # Skip infinite vertex
                 if triangulation.can_vertex_be_removed(vertex_id):
                     try:
+                        triangulation.remove(vertex_id)
+
                         interpolated_value = triangulation.interpolate_tin_linear(x, y)
 
-                        # Only append delta's that are less than fine threshold
-                        if abs(interpolated_value - z) < FINE_THRESHOLD:
-                            heap.append((abs(interpolated_value - z) * -1, vertex_id, x, y, z))
+                        triangulation.insert_one_pt(x, y, z, vertex_id)
+
+                        heap.append((abs(interpolated_value - z), vertex_id, x, y, z))
 
                     # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
                     # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
@@ -191,21 +193,41 @@ class Triangulation:
             while heap:
                 lowest_delta = heappop(heap)
 
+                delta = lowest_delta[0]
                 vertex_id = lowest_delta[1]
-                x = lowest_delta[2]
-                y = lowest_delta[3]
-                z = lowest_delta[4]
 
-                try:
-                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
+                if delta < FINE_THRESHOLD:
+                    triangulation.remove(vertex_id)
+                else:
+                    break
 
-                    if abs(interpolated_value - z) < FINE_THRESHOLD:
-                        triangulation.remove(vertex_id)
+                # Recalculate errors once every 100 points
+                if len(heap) % 100 == 0:
+                    sys.stderr.write("Size of heap: {}\n".format(len(heap)))
+                    sys.stderr.flush()
+                    for i in range(len(heap)):
 
-                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
-                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
-                except OSError:
-                    pass
+                        vertex_id = heap[i][1]
+
+                        if triangulation.can_vertex_be_removed(vertex_id):
+
+                            triangulation.remove(vertex_id)
+
+                            x = heap[i][2]
+                            y = heap[i][3]
+                            z = heap[i][4]
+
+                            interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
+
+                            triangulation.insert_one_pt(x, y, z, vertex_id)
+
+                            old_val = heap[i]
+                            heap[i] = (interpolated_value, heap[i][1], heap[i][2], heap[i][3], heap[i][4])
+
+                            if heap[i][0] > old_val[0]:
+                                _siftup(heap, i)
+                            else:
+                                _siftdown(heap, 0, i)
 
             for vertex in triangulation.all_vertices():
                 # Don't print infinite vertex
@@ -268,9 +290,7 @@ class Processor:
         elif identifier == "x":
             # cell finalizer
 
-            # sys.stderr.write("Finalizing: {}\n".format(data))
-            # self.triangulation.finalize(input_line, int(data[0]), int(data[1]))
-
+            # While sprinkling, don't bother processing since all finalized cells now are still empty anyways
             if self.sprinkling:
                 sys.stdout.write(input_line)
                 return
@@ -281,7 +301,7 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= cpu_count() / 2:
+            while len(self.processes) >= cpu_count() - 2:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
