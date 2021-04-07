@@ -1,5 +1,6 @@
 import sys
 import time
+from heapq import heapify, heappop
 
 import startin
 
@@ -9,8 +10,24 @@ from math import floor
 from multiprocessing import cpu_count, Process
 from scipy.spatial import KDTree
 
-COARSE_THRESHOLD = 1
-FINE_THRESHOLD = 0.2
+COARSE_THRESHOLD = 3
+FINE_THRESHOLD = 0.3
+
+# 37EN1 - 2m - 0.2m (6 threads)
+# START TIME: 2021-04-06T09:34:35
+# END TIME:   2021-04-06T18:06:22
+
+# 37EN1 - Ground Only Decimation - 3m - 0.3m (10 threads)
+# START TIME: 2021-04-07T14:44:16
+# END TIME:   2021-04-07T17:35:27
+
+# 37EN2 - 3m - 0.3m (6 threads)
+# START TIME: 2021-04-06T22:00:00
+# END TIME:   2021-04-07T05:27:13
+
+# 37AN1 - 3m - 0.3m (2 threads)
+# START TIME: 2021-04-06T22:28:21
+# END TIME:   2021-04-06T23:56:15
 
 
 def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
@@ -94,7 +111,7 @@ class Triangulation:
                 # Get nearest point to corner
                 distances, indexes = tree.query(corner_point, k=10)
 
-                queried_z_vals = [z_vals[index] for index in indexes]
+                queried_z_vals = [z_vals[index] for index in indexes if index < len(z_vals)]
 
                 # add a corner point with average z value of 10 nearest
                 near_corner_points.append([corner_point[0], corner_point[1], sum(queried_z_vals) / len(queried_z_vals)])
@@ -102,6 +119,8 @@ class Triangulation:
             triangulation.insert(near_corner_points)
 
             to_delete = []
+
+            # First coarse loop
 
             for key, vertex in vertices.items():
                 x = vertex[0]
@@ -123,6 +142,8 @@ class Triangulation:
             for key in reversed(to_delete):
                 del vertices[key]
 
+            # Fine loop
+
             for key, vertex in vertices.items():
                 x = vertex[0]
                 y = vertex[1]
@@ -133,6 +154,53 @@ class Triangulation:
 
                     if abs(interpolated_value - z) > FINE_THRESHOLD:
                         triangulation.insert_one_pt(x, y, z, 0)
+
+                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
+                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
+                except OSError:
+                    pass
+
+            # Decimation step with fine threshold
+            heap = []
+
+            vertex_id = 0
+
+            for vertex in triangulation.all_vertices():
+                x = vertex[0]
+                y = vertex[1]
+                z = vertex[2]
+
+                # Skip infinite vertex
+                if triangulation.can_vertex_be_removed(vertex_id):
+                    try:
+                        interpolated_value = triangulation.interpolate_tin_linear(x, y)
+
+                        # Only append delta's that are less than fine threshold
+                        if abs(interpolated_value - z) < FINE_THRESHOLD:
+                            heap.append((abs(interpolated_value - z) * -1, vertex_id, x, y, z))
+
+                    # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
+                    # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
+                    except OSError:
+                        pass
+
+                vertex_id += 1
+
+            heapify(heap)
+
+            while heap:
+                lowest_delta = heappop(heap)
+
+                vertex_id = lowest_delta[1]
+                x = lowest_delta[2]
+                y = lowest_delta[3]
+                z = lowest_delta[4]
+
+                try:
+                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
+
+                    if abs(interpolated_value - z) < FINE_THRESHOLD:
+                        triangulation.remove(vertex_id)
 
                 # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
                 # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
@@ -162,7 +230,9 @@ class Processor:
         data = split_line[1:]
 
         if identifier == "#" or identifier == "":
-            pass
+            if data[0] == "endsprinkle":
+                self.sprinkling = False
+                sys.stderr.write("Sprinkling done!\n")
 
         elif identifier == "n":
             # Total number of points
@@ -185,14 +255,10 @@ class Processor:
             sys.stdout.write(input_line)
 
         elif identifier == "v":
-            # Stupid hack because output didn't include an end sprinkle indicator
-            # TODO: Replace when sstfin includes #endsprinkle indicator
-            if float(data[0]) == 80396.714 and float(data[1]) == 444149.420 and float(data[2]) == -2.340:
-                self.sprinkling = False
-                sys.stderr.write("Sprinkling done!\n")
-
             # vertex
             # self.triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
+
+            # All sprinkle points get passed to output directly
             if not self.sprinkling:
                 self.triangulation.insert_vertex(float(data[0]), float(data[1]), float(data[2]))
 
@@ -209,7 +275,7 @@ class Processor:
                 sys.stdout.write(input_line)
                 return
 
-            sys.stderr.write("Starting new process to finalize: {}. Processing currently running: {}\n".format(data, len(self.processes)))
+            sys.stderr.write("Starting new process to finalize cell: {}, {}. Processing currently running: {}\n".format(data[0], data[1], len(self.processes)))
             sys.stderr.flush()
 
             sleep_time = 1
