@@ -17,9 +17,13 @@ FINE_THRESHOLD = 0.2
 # START TIME: 2021-04-06T09:34:35
 # END TIME:   2021-04-06T18:06:22
 
-# 37EN1 - Ground Only Decimation - 3m - 0.3m (10 threads)
+# 37EN1 - Ground Only Decimation v1 (shitty) - 3m - 0.3m (10 threads)
 # START TIME: 2021-04-07T14:44:16
 # END TIME:   2021-04-07T17:35:27
+
+# 37EN1 - Ground Only Decimation v2 - 2m - 0.3m (10 threads)
+# START TIME: 2021-04-07T20:14:07
+# END TIME:   2021-04-08T08:24:05
 
 # 37EN2 - 3m - 0.3m (6 threads)
 # START TIME: 2021-04-06T22:00:00
@@ -28,10 +32,6 @@ FINE_THRESHOLD = 0.2
 # 37AN1 - 3m - 0.3m (2 threads)
 # START TIME: 2021-04-06T22:28:21
 # END TIME:   2021-04-06T23:56:15
-
-
-def is_almost(a, b, rel_tol=1e-09, abs_tol=0.0):
-    return abs(a - b) <= max(rel_tol * max(abs(a), abs(b)), abs_tol)
 
 
 class Triangulation:
@@ -82,7 +82,6 @@ class Triangulation:
         return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
 
     def finalize(self, input_line, grid_x, grid_y, vertices):
-
         if len(vertices) > 0:
 
             triangulation = startin.DT()
@@ -172,9 +171,9 @@ class Triangulation:
 
                 # Skip infinite vertex
                 if triangulation.can_vertex_be_removed(vertex_id):
-                    try:
-                        triangulation.remove(vertex_id)
+                    triangulation.remove(vertex_id)
 
+                    try:
                         interpolated_value = triangulation.interpolate_tin_linear(x, y)
 
                         triangulation.insert_one_pt(x, y, z, vertex_id)
@@ -195,39 +194,52 @@ class Triangulation:
 
                 delta = lowest_delta[0]
                 vertex_id = lowest_delta[1]
+                x = lowest_delta[2]
+                y = lowest_delta[3]
+                z = lowest_delta[4]
 
-                if delta < FINE_THRESHOLD:
+                if triangulation.can_vertex_be_removed(vertex_id):
                     triangulation.remove(vertex_id)
-                else:
+
+                    try:
+                        interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
+
+                        if interpolated_value > FINE_THRESHOLD:
+                            triangulation.insert_one_pt(x, y, z, vertex_id)
+
+                    except OSError:
+                        triangulation.insert_one_pt(x, y, z, vertex_id)
+
+                if delta > FINE_THRESHOLD:
                     break
 
                 # Recalculate errors once every 100 points
                 if len(heap) % 100 == 0:
-                    sys.stderr.write("Size of heap: {}\n".format(len(heap)))
-                    sys.stderr.flush()
                     for i in range(len(heap)):
-
                         vertex_id = heap[i][1]
 
                         if triangulation.can_vertex_be_removed(vertex_id):
-
-                            triangulation.remove(vertex_id)
-
                             x = heap[i][2]
                             y = heap[i][3]
                             z = heap[i][4]
 
-                            interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
+                            triangulation.remove(vertex_id)
 
-                            triangulation.insert_one_pt(x, y, z, vertex_id)
+                            try:
+                                interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
 
-                            old_val = heap[i]
-                            heap[i] = (interpolated_value, heap[i][1], heap[i][2], heap[i][3], heap[i][4])
+                                triangulation.insert_one_pt(x, y, z, vertex_id)
 
-                            if heap[i][0] > old_val[0]:
-                                _siftup(heap, i)
-                            else:
-                                _siftdown(heap, 0, i)
+                                old_val = heap[i]
+                                heap[i] = (interpolated_value, heap[i][1], heap[i][2], heap[i][3], heap[i][4])
+
+                                if heap[i][0] > old_val[0]:
+                                    _siftup(heap, i)
+                                else:
+                                    _siftdown(heap, 0, i)
+
+                            except OSError:
+                                triangulation.insert_one_pt(x, y, z, vertex_id)
 
             for vertex in triangulation.all_vertices():
                 # Don't print infinite vertex
@@ -241,8 +253,8 @@ class Triangulation:
 class Processor:
     def __init__(self, dt):
         self.triangulation = dt
-        self.sprinkling = True
 
+        self.sprinkling = True
         self.processes = []
 
     def process_line(self, input_line):
