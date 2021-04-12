@@ -22,7 +22,10 @@ class Vertex:
         self.delta_z = 0
 
     def __str__(self):
-        return "{} {} {} - {}\n".format(self.x, self.y, self.z, self.delta_z)
+        return "{} {} {} - {}".format(self.x, self.y, self.z, (self.delta_z / DELTA_PRECISION) * -1)
+
+    def __lt__(self, other):
+        return self.delta_z < other.delta_z
 
 class Triangulation:
     def __init__(self):
@@ -82,35 +85,28 @@ class Triangulation:
             triangulation.insert(near_corner_points)
 
             heap = []
-            worst_point_index = 1
 
             for vertex_id, vertex in vertices.items():
                 try:
                     interpolated_value = triangulation.interpolate_tin_linear(vertex.x, vertex.y)
 
-                    vertex.delta_z = round(abs(interpolated_value - vertex.z) * DELTA_PRECISION) / DELTA_PRECISION
+                    vertex.delta_z = round(abs(interpolated_value - vertex.z) * DELTA_PRECISION) * -1
 
-                    if vertex.delta_z > vertices[worst_point_index].delta_z:
-                        worst_point_index = vertex_id
+                    heap.append(vertex)
 
                 # If outside CH, always insert
                 except OSError:
-                    triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2], 0)
+                    triangulation.insert_one_pt(vertex.x, vertex.y, vertex.z, 0)
 
-            # heapify(heap)
+            heapify(heap)
 
             loop_time = time.time()
 
-            largest_delta = vertices[worst_point_index]
-
-            while True:
-                if len(vertices) % 100 == 0:
-                    sys.stderr.write("Vertices left: {}, time since last 100: {}\n".format(len(vertices), time.time() - loop_time))
-                    sys.stderr.flush()
-                    loop_time = time.time()
+            while heap:
+                largest_delta = heappop(heap)
 
                 try:
-                    if largest_delta.delta_z > TRIANGULATION_THRESHOLD:
+                    if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
                         triangulation.insert_one_pt(largest_delta.x, largest_delta.y, largest_delta.z, 0)
                     else:
                         break
@@ -119,18 +115,20 @@ class Triangulation:
                 except OSError:
                     pass
 
-                for vertex_id, vertex in vertices.items():
-                    interpolated_value = triangulation.interpolate_tin_linear(vertex.x, vertex.y)
+                if len(heap) % 10 == 0:
+                    sys.stderr.write("Vertices left: {}, time since last: {}, worst vertex: {}\n".format(len(heap), time.time() - loop_time, largest_delta))
+                    sys.stderr.flush()
+                    loop_time = time.time()
 
-                    vertex.delta_z = round(abs(interpolated_value - vertex.z) * DELTA_PRECISION) / DELTA_PRECISION
+                    for i in range(len(heap)):
+                        interpolated_value = triangulation.interpolate_tin_linear(heap[i].x, heap[i].y)
 
-                    if vertex.delta_z > vertices[worst_point_index].delta_z:
-                        worst_point_index = vertex_id
+                        # Heap is min-based, so multiply by -1 to ensure max delta is at top
+                        heap[i].delta_z = round(abs(interpolated_value - heap[i].z) * DELTA_PRECISION) * -1
 
-                largest_delta = vertices[worst_point_index]
+                    heapify(heap)
 
-                del vertices[worst_point_index]
-                worst_point_index = random.choice(list(vertices.keys()))
+            # TODO: Remove 'helper' corner vertices (id's 1, 2, 3, 4)
 
             for vertex in triangulation.all_vertices():
                 if vertex[0] > 0:  # Exclude infinite vertex
@@ -199,7 +197,7 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= cpu_count() - 4:
+            while len(self.processes) >= 30:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
