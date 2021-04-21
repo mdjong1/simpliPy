@@ -1,17 +1,27 @@
-import random
+import multiprocessing
 import sys
+import os
 import time
+
+import psutil
 
 import startin
 
 import numpy as np
 
 from heapq import heappop, heapify
-from multiprocessing import cpu_count, Process
+from multiprocessing import cpu_count, Process, Queue
 from scipy.spatial import KDTree
 
 TRIANGULATION_THRESHOLD = 0.2
 DELTA_PRECISION = 1E4
+
+
+class MemoryUsage:
+    def __init__(self, process_name, timestamp, memory_usage):
+        self.process_name = process_name
+        self.timestamp = timestamp
+        self.memory_usage = memory_usage
 
 
 class Vertex:
@@ -27,6 +37,7 @@ class Vertex:
     def __lt__(self, other):
         return self.delta_z < other.delta_z
 
+
 class Triangulation:
     def __init__(self):
         self.cell_size = None
@@ -39,6 +50,8 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
+        self.last_log_time = round(time.time())
+
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
         self.min_y = min_y
@@ -49,7 +62,7 @@ class Triangulation:
         self.vertices[self.vertex_id] = Vertex(x, y, z)
         self.vertex_id += 1
 
-    def finalize(self, input_line, grid_x, grid_y, vertices):
+    def finalize(self, input_line, grid_x, grid_y, vertices, memory_usage_queue):
         if len(vertices) > 0:
             triangulation = startin.DT()
 
@@ -100,9 +113,8 @@ class Triangulation:
 
             heapify(heap)
 
-            loop_time = time.time()
-
             while heap:
+
                 largest_delta = heappop(heap)
 
                 try:
@@ -116,20 +128,20 @@ class Triangulation:
                     pass
 
                 if len(heap) % 10 == 0:
-                    sys.stderr.write("Vertices left: {}, time since last: {}, worst vertex: {}\n".format(len(heap), time.time() - loop_time, largest_delta))
-                    sys.stderr.flush()
-                    loop_time = time.time()
-
                     for i in range(len(heap)):
                         interpolated_value = triangulation.interpolate_tin_linear(heap[i].x, heap[i].y)
 
                         # Heap is min-based, so multiply by -1 to ensure max delta is at top
                         heap[i].delta_z = round(abs(interpolated_value - heap[i].z) * DELTA_PRECISION) * -1
 
-                    heapify(heap)
+                heapify(heap)
 
-            # TODO: Remove 'helper' corner vertices (id's 1, 2, 3, 4)
-
+            # Remove the initial corner point helpers, only if there are more than just the corner points
+            if triangulation.number_of_vertices() > 4:
+                for i in [1, 2, 3, 4]:
+                    triangulation.remove(i)
+            
+            # If there are only 4 left, those are representative for the surface
             for vertex in triangulation.all_vertices():
                 if vertex[0] > 0:  # Exclude infinite vertex
                     sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
@@ -197,7 +209,7 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= 30:
+            while len(self.processes) >= cpu_count() * 2:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
