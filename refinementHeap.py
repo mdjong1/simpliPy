@@ -1,7 +1,7 @@
-import multiprocessing
 import sys
 import os
 import time
+from math import floor
 
 import psutil
 
@@ -10,8 +10,11 @@ import startin
 import numpy as np
 
 from heapq import heappop, heapify
-from multiprocessing import cpu_count, Process, Queue
+from multiprocessing import cpu_count, Process, Queue, current_process, Lock
 from scipy.spatial import KDTree
+
+RECALCULATION_INTERVAL_STEP_SIZE = 1/4
+RECALCULATION_INTERVAL_UPPER_BOUNDARY = 25
 
 TRIANGULATION_THRESHOLD = 0.2
 DELTA_PRECISION = 1E4
@@ -62,7 +65,9 @@ class Triangulation:
         self.vertices[self.vertex_id] = Vertex(x, y, z)
         self.vertex_id += 1
 
-    def finalize(self, input_line, grid_x, grid_y, vertices, memory_usage_queue):
+    def finalize(self, input_line, grid_x, grid_y, vertices, lock):
+        stdout_lines = []
+
         if len(vertices) > 0:
             triangulation = startin.DT()
 
@@ -113,41 +118,67 @@ class Triangulation:
 
             heapify(heap)
 
+            recalculation_interval = 5
+            points_processed_this_loop = 0
+
             while heap:
 
                 largest_delta = heappop(heap)
 
-                try:
-                    if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
+                if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
+                    try:
                         triangulation.insert_one_pt(largest_delta.x, largest_delta.y, largest_delta.z, 0)
-                    else:
-                        break
+                        points_processed_this_loop += 1
 
-                # Somehow point is outside bbox, ignore
-                except OSError:
-                    pass
+                    # Somehow point is outside bbox, ignore
+                    except OSError:
+                        pass
+                else:
+                    break
 
-                if len(heap) % 10 == 0:
+                if points_processed_this_loop % floor(recalculation_interval) == 0:
+
+                    points_processed_this_loop = 0
+
+                    sys.stderr.write(current_process().name + " - Recalculating heap\n")
+                    recalculation_interval += RECALCULATION_INTERVAL_STEP_SIZE
+
                     for i in range(len(heap)):
-                        interpolated_value = triangulation.interpolate_tin_linear(heap[i].x, heap[i].y)
+                        try:
+                            interpolated_value = triangulation.interpolate_tin_linear(heap[i].x, heap[i].y)
 
-                        # Heap is min-based, so multiply by -1 to ensure max delta is at top
-                        heap[i].delta_z = round(abs(interpolated_value - heap[i].z) * DELTA_PRECISION) * -1
+                            # Heap is min-based, so multiply by -1 to ensure max delta is at top
+                            heap[i].delta_z = round(abs(interpolated_value - heap[i].z) * DELTA_PRECISION) * -1
 
-                heapify(heap)
+                        # Somehow outside CH; ignore
+                        except OSError:
+                            pass
+
+                    heapify(heap)
 
             # Remove the initial corner point helpers, only if there are more than just the corner points
             if triangulation.number_of_vertices() > 4:
                 for i in [1, 2, 3, 4]:
                     triangulation.remove(i)
-            
-            # If there are only 4 left, those are representative for the surface
-            for vertex in triangulation.all_vertices():
-                if vertex[0] > 0:  # Exclude infinite vertex
-                    sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
-        sys.stdout.write(input_line)
-        sys.stdout.flush()
+                # Replace artificial corners with legit corners
+                # TODO: Better way?
+                # for corner_point in corner_points:
+                #     # Get nearest point to corner
+                #     distance, index = tree.query(corner_point, k=1)
+                #
+                #     triangulation.insert_one_pt(x_vals[index], y_vals[index], z_vals[index], 0)
+
+                # If there are only 4 left, those are representative for the surface
+                for vertex in triangulation.all_vertices():
+                    if vertex[0] > 0:  # Exclude infinite vertex
+                        stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+
+        with lock:
+            stdout_lines.append(input_line)
+            sys.stdout.write("".join(stdout_lines))
+
+            sys.stdout.flush()
 
 
 class Processor:
@@ -156,6 +187,8 @@ class Processor:
 
         self.sprinkling = True
         self.processes = []
+
+        self.stdout_lock = Lock()
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
@@ -216,7 +249,7 @@ class Processor:
 
                 time.sleep(sleep_time)
 
-            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices))
+            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices, self.stdout_lock), daemon=True)
             self.triangulation.vertices = {}
             self.triangulation.vertex_id = 1
             self.processes.append(process)
@@ -232,9 +265,12 @@ class Processor:
 if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
+    start_time = time.time()
 
     for stdin_line in sys.stdin:
         processor.process_line(stdin_line)
 
     for process in processor.processes:
         process.join()
+
+    sys.stderr.write("duration: " + str(time.time() - start_time) + "\n")
