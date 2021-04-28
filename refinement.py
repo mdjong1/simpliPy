@@ -81,7 +81,6 @@ class Triangulation:
 
             triangulation.insert(near_corner_points)
 
-            heap = []
             worst_point_index = 1
 
             for vertex_id, vertex in vertices.items():
@@ -96,8 +95,6 @@ class Triangulation:
                 # If outside CH, always insert
                 except OSError:
                     triangulation.insert_one_pt(vertex[0], vertex[1], vertex[2], 0)
-
-            # heapify(heap)
 
             loop_time = time.time()
 
