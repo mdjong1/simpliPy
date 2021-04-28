@@ -156,23 +156,9 @@ class Triangulation:
 
                     heapify(heap)
 
-            # Remove the initial corner point helpers, only if there are more than just the corner points
-            if triangulation.number_of_vertices() > 4:
-                for i in [1, 2, 3, 4]:
-                    triangulation.remove(i)
-
-                # Replace artificial corners with legit corners
-                # TODO: Better way?
-                # for corner_point in corner_points:
-                #     # Get nearest point to corner
-                #     distance, index = tree.query(corner_point, k=1)
-                #
-                #     triangulation.insert_one_pt(x_vals[index], y_vals[index], z_vals[index], 0)
-
-                # If there are only 4 left, those are representative for the surface
-                for vertex in triangulation.all_vertices():
-                    if vertex[0] > 0:  # Exclude infinite vertex
-                        stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+            for vertex in triangulation.all_vertices():
+                if vertex[0] > 0:  # Exclude infinite vertex
+                    stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
         with lock:
             stdout_lines.append(input_line)
@@ -242,7 +228,7 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= cpu_count() * 2:
+            while len(self.processes) >= cpu_count() - 4:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
