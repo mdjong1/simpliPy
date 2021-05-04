@@ -129,7 +129,7 @@ class Triangulation:
 
                 if current_time != last_log_time:
                     memory_usage_queue.put(MemoryUsage(current_process().name, current_time, psutil.Process(os.getpid()).memory_info().rss))
-                    self.last_log_time = current_time
+                    last_log_time = current_time
 
                 largest_delta = heappop(heap)
 
@@ -195,7 +195,12 @@ class Processor:
             while True:
                 val = memory_usage_queue.get()
 
+                sys.stderr.write(str(val.process_name) + ", " + str(val.timestamp) + ", " + str(val.memory_usage) + "\n")
+                sys.stderr.flush()
+
                 memory_log_file.write(str(val.process_name) + ", " + str(val.timestamp) + ", " + str(val.memory_usage) + "\n")
+
+                time.sleep(0.001)
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
