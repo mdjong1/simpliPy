@@ -53,8 +53,6 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
-        self.last_log_time = round(time.time())
-
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
         self.min_y = min_y
@@ -65,10 +63,14 @@ class Triangulation:
         self.vertices[self.vertex_id] = Vertex(x, y, z)
         self.vertex_id += 1
 
-    def finalize(self, input_line, grid_x, grid_y, vertices, lock):
+    def finalize(self, input_line, grid_x, grid_y, vertices, lock, memory_usage_queue):
         stdout_lines = []
 
         if len(vertices) > 0:
+
+            last_log_time = round(time.time())
+            memory_usage_queue.put(MemoryUsage(current_process().name, last_log_time, psutil.Process(os.getpid()).memory_info().rss))
+
             triangulation = startin.DT()
 
             x_vals = []
@@ -123,6 +125,12 @@ class Triangulation:
 
             while heap:
 
+                current_time = round(time.time())
+
+                if current_time != last_log_time:
+                    memory_usage_queue.put(MemoryUsage(current_process().name, current_time, psutil.Process(os.getpid()).memory_info().rss))
+                    self.last_log_time = current_time
+
                 largest_delta = heappop(heap)
 
                 if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
@@ -174,13 +182,32 @@ class Processor:
         self.sprinkling = True
         self.processes = []
 
+        self.last_log_time = round(time.time())
+
         self.stdout_lock = Lock()
+        self.memory_usage_queue = Queue()
+
+        self.memory_usage_writer = Process(target=self.write_memory_usage, args=(self.memory_usage_queue,), daemon=True)
+        self.memory_usage_writer.start()
+
+    def write_memory_usage(self, memory_usage_queue):
+        with open(os.path.join(os.getcwd(), "memory_log.csv"), "a") as memory_log_file:
+            while True:
+                val = memory_usage_queue.get()
+
+                memory_log_file.write(str(val.process_name) + ", " + str(val.timestamp) + ", " + str(val.memory_usage) + "\n")
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
 
         identifier = split_line[0]
         data = split_line[1:]
+
+        current_time = round(time.time())
+
+        if current_time != self.last_log_time:
+            self.memory_usage_queue.put(MemoryUsage("Main", current_time, psutil.Process(os.getpid()).memory_info().rss))
+            self.last_log_time = current_time
 
         if identifier == "#" or identifier == "":
             if data[0] == "endsprinkle":
@@ -235,7 +262,7 @@ class Processor:
 
                 time.sleep(sleep_time)
 
-            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices, self.stdout_lock), daemon=True)
+            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices, self.stdout_lock, self.memory_usage_queue,), daemon=True)
             self.triangulation.vertices = {}
             self.triangulation.vertex_id = 1
             self.processes.append(process)
@@ -258,5 +285,7 @@ if __name__ == "__main__":
 
     for process in processor.processes:
         process.join()
+
+    processor.memory_usage_writer.terminate()
 
     sys.stderr.write("duration: " + str(time.time() - start_time) + "\n")
