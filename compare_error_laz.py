@@ -62,7 +62,7 @@ for i in range(len(original_vertices)):
     vertex = original_vertices[i]
 
     if i % 10000 == 0:
-        percentage = round(i / len(original_vertices))
+        percentage = round((i / len(original_vertices)) / 100)
         print(percentage, "% done")
         if percentage != last_percentage:
             print(percentage, "% done")
