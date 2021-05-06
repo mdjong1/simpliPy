@@ -52,7 +52,7 @@ class Triangulation:
 
     def simplify_triangulation(self, finalize=False):
 
-        total_vertices = self.triangulation.number_of_vertices()
+        # total_vertices = self.triangulation.number_of_vertices()
 
         # print("Processing {} vertices!".format(total_vertices))
 
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
 
-    for stdin_line in sys.stdin.readlines():
+    for stdin_line in sys.stdin:
         processor.process_line(stdin_line)
 
     # Finalize remaining points
