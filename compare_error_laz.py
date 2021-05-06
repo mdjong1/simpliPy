@@ -72,7 +72,7 @@ for i in range(len(original_vertices)):
         try:
             interpolated_value = simplified_triangulation.interpolate_tin_linear(vertex[0], vertex[1])
 
-            features.append(Feature(geometry=Point((vertex[0], vertex[1], vertex[2])), properties={"error": abs(vertex[2] - interpolated_value)}))
+            features.append(Feature(geometry=Point((vertex[0], vertex[1], vertex[2])), properties={"error": vertex[2] - interpolated_value}))
 
         except OSError:
             print("Could not interpolate {}, {}".format(vertex[0], vertex[1]))
