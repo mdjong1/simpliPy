@@ -145,10 +145,7 @@ class Triangulation:
                     break
 
                 if points_processed_this_loop % floor(recalculation_interval) == 0:
-
                     points_processed_this_loop = 0
-
-                    sys.stderr.write(current_process().name + " - Recalculating heap\n")
                     recalculation_interval += RECALCULATION_INTERVAL_STEP_SIZE
 
                     for i in range(len(heap)):
@@ -172,7 +169,8 @@ class Triangulation:
             stdout_lines.append(input_line)
             sys.stdout.write("".join(stdout_lines))
 
-            sys.stdout.flush()
+        sys.stderr.write(current_process().name + " - FINISHED.\n")
+        sys.stdout.flush()
 
 
 class Processor:
