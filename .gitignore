@@ -5,4 +5,9 @@ npyd/
 simplified/
 sliced/
 
+build/
+
 *.obj
+*.json
+*.geojson
+
