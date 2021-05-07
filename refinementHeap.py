@@ -161,6 +161,11 @@ class Triangulation:
 
                     heapify(heap)
 
+            # Remove initial corners
+            for i in [1, 2, 3, 4]:
+                triangulation.remove(i)
+
+            # Output all remaining vertices
             for vertex in triangulation.all_vertices():
                 if vertex[0] > 0:  # Exclude infinite vertex
                     stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
@@ -168,9 +173,9 @@ class Triangulation:
         with lock:
             stdout_lines.append(input_line)
             sys.stdout.write("".join(stdout_lines))
+            sys.stdout.flush()
 
         sys.stderr.write(current_process().name + " - FINISHED.\n")
-        sys.stdout.flush()
 
 
 class Processor:
