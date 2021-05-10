@@ -1,18 +1,23 @@
-import os
 import sys
+import os
 import time
+from math import floor
+
 import psutil
 
-import startinpy
+import startin
 
 import numpy as np
 
-from heapq import heapify, heappop
-from multiprocessing import cpu_count, Process, Lock, Queue, current_process
+from heapq import heappop, heapify
+from multiprocessing import cpu_count, Process, Queue, current_process, Lock
 from scipy.spatial import KDTree
 
-COARSE_THRESHOLD = 2
-FINE_THRESHOLD = 0.2
+RECALCULATION_INTERVAL_STEP_SIZE = 1
+RECALCULATION_INTERVAL_UPPER_BOUNDARY = 25
+
+TRIANGULATION_THRESHOLD = 0.2
+DELTA_PRECISION = 1E4
 
 
 class MemoryUsage:
@@ -20,6 +25,20 @@ class MemoryUsage:
         self.process_name = process_name
         self.timestamp = timestamp
         self.memory_usage = memory_usage
+
+
+class Vertex:
+    def __init__(self, x, y, z):
+        self.x = x
+        self.y = y
+        self.z = z
+        self.delta_z = 0
+
+    def __str__(self):
+        return "{} {} {} - {}".format(self.x, self.y, self.z, (self.delta_z / DELTA_PRECISION) * -1)
+
+    def __lt__(self, other):
+        return self.delta_z < other.delta_z
 
 
 class Triangulation:
@@ -31,26 +50,37 @@ class Triangulation:
         self.max_x = None
         self.max_y = None
 
+        self.vertices = {}
+        self.vertex_id = 1
+
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
         self.min_y = min_y
         self.max_x = max_x
         self.max_y = max_y
 
+    def insert_vertex(self, x, y, z):
+        self.vertices[self.vertex_id] = Vertex(x, y, z)
+        self.vertex_id += 1
+
     def finalize(self, input_line, grid_x, grid_y, vertices, lock, memory_usage_queue):
         stdout_lines = []
+
         if len(vertices) > 0:
 
-            triangulation = startinpy.DT()
+            last_log_time = round(time.time())
+            memory_usage_queue.put(MemoryUsage(current_process().name, last_log_time, psutil.Process(os.getpid()).memory_info().rss))
+
+            triangulation = startin.DT()
 
             x_vals = []
             y_vals = []
             z_vals = []
 
-            for vertex_id, point in vertices.items():
-                x_vals.append(point[0])
-                y_vals.append(point[1])
-                z_vals.append(point[2])
+            for vertex_id, vertex in vertices.items():
+                x_vals.append(vertex.x)
+                y_vals.append(vertex.y)
+                z_vals.append(vertex.z)
 
             tree = KDTree(np.c_[x_vals, y_vals])
 
@@ -74,151 +104,83 @@ class Triangulation:
 
             triangulation.insert(near_corner_points)
 
-            to_delete = []
-
-            # First coarse loop
-
-            for key, vertex in vertices.items():
-                x = vertex[0]
-                y = vertex[1]
-                z = vertex[2]
-
-                try:
-                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
-
-                    if abs(interpolated_value - z) > COARSE_THRESHOLD:
-                        triangulation.insert_one_pt(x, y, z, 0)
-                        to_delete.append(key)
-
-                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
-                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
-                except OSError:
-                    pass
-
-            for key in reversed(to_delete):
-                del vertices[key]
-
-            # Fine loop
-
-            for key, vertex in vertices.items():
-                x = vertex[0]
-                y = vertex[1]
-                z = vertex[2]
-
-                try:
-                    interpolated_value = triangulation.interpolate_tin_linear(x, y)
-
-                    if abs(interpolated_value - z) > FINE_THRESHOLD:
-                        triangulation.insert_one_pt(x, y, z, 0)
-
-                # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
-                # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
-                except OSError:
-                    pass
-
-            # Decimation step with fine threshold
             heap = []
 
-            vertex_id = 0
+            for vertex_id, vertex in vertices.items():
+                try:
+                    interpolated_value = triangulation.interpolate_tin_linear(vertex.x, vertex.y)
 
-            for vertex in triangulation.all_vertices():
-                x = vertex[0]
-                y = vertex[1]
-                z = vertex[2]
+                    vertex.delta_z = round(abs(interpolated_value - vertex.z) * DELTA_PRECISION) * -1
 
-                # Skip infinite vertex
-                if triangulation.can_vertex_be_removed(vertex_id):
-                    triangulation.remove(vertex_id)
+                    heap.append(vertex)
 
-                    try:
-                        interpolated_value = triangulation.interpolate_tin_linear(x, y)
-
-                        triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                        heap.append((abs(interpolated_value - z), vertex_id, x, y, z))
-
-                    # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
-                    # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
-                    except OSError:
-                        pass
-
-                vertex_id += 1
+                # If outside CH, always insert
+                except OSError:
+                    triangulation.insert_one_pt(vertex.x, vertex.y, vertex.z, 0)
 
             heapify(heap)
 
+            recalculation_interval = 5
+            points_processed_this_loop = 0
+
             while heap:
-                lowest_delta = heappop(heap)
 
-                delta = lowest_delta[0]
-                vertex_id = lowest_delta[1]
-                x = lowest_delta[2]
-                y = lowest_delta[3]
-                z = lowest_delta[4]
+                current_time = round(time.time())
 
-                if triangulation.can_vertex_be_removed(vertex_id):
-                    triangulation.remove(vertex_id)
+                if current_time != last_log_time:
+                    memory_usage_queue.put(MemoryUsage(current_process().name, current_time, psutil.Process(os.getpid()).memory_info().rss))
+                    last_log_time = current_time
 
+                largest_delta = heappop(heap)
+
+                if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
                     try:
-                        interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
+                        triangulation.insert_one_pt(largest_delta.x, largest_delta.y, largest_delta.z, 0)
+                        points_processed_this_loop += 1
 
-                        if interpolated_value > FINE_THRESHOLD:
-                            triangulation.insert_one_pt(x, y, z, vertex_id)
-
+                    # Somehow point is outside bbox, ignore
                     except OSError:
-                        triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                if delta > FINE_THRESHOLD:
+                        pass
+                else:
                     break
 
-                # Recalculate errors once every 10 points
-                if len(heap) % 1 == 0:
+                if points_processed_this_loop % floor(recalculation_interval) == 0:
+                    points_processed_this_loop = 0
+                    recalculation_interval += RECALCULATION_INTERVAL_STEP_SIZE
+
                     for i in range(len(heap)):
-                        vertex_id = heap[i][1]
+                        try:
+                            interpolated_value = triangulation.interpolate_tin_linear(heap[i].x, heap[i].y)
 
-                        if triangulation.can_vertex_be_removed(vertex_id):
-                            x = heap[i][2]
-                            y = heap[i][3]
-                            z = heap[i][4]
+                            # Heap is min-based, so multiply by -1 to ensure max delta is at top
+                            heap[i].delta_z = round(abs(interpolated_value - heap[i].z) * DELTA_PRECISION) * -1
 
-                            triangulation.remove(vertex_id)
-
-                            try:
-                                interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
-
-                                triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                                heap[i] = (interpolated_value, vertex_id, x, y, z)
-
-                            except OSError:
-                                triangulation.insert_one_pt(x, y, z, vertex_id)
+                        # Somehow outside CH; ignore
+                        except OSError:
+                            pass
 
                     heapify(heap)
 
+            # Remove initial corners
+            for i in [1, 2, 3, 4]:
+                triangulation.remove(i)
 
-            if triangulation.number_of_vertices() > 4:
-                for i in [1, 2, 3, 4]:
-                    triangulation.remove(i)
-
+            # Output all remaining vertices
             for vertex in triangulation.all_vertices():
-                # Don't print infinite vertex
-                if vertex[0] > 0:
+                if vertex[0] > 0:  # Exclude infinite vertex
                     stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
-        memory_usage_queue.put(MemoryUsage(current_process().name, round(time.time()), psutil.Process(os.getpid()).memory_info().rss))
-
-        stdout_lines.append(input_line)
-
         with lock:
+            stdout_lines.append(input_line)
             sys.stdout.write("".join(stdout_lines))
             sys.stdout.flush()
+
+        sys.stderr.write(current_process().name + " - FINISHED.\n")
 
 
 class Processor:
     def __init__(self, dt):
         self.triangulation = dt
-
-        self.vertex_id = 1
-        self.vertices = {}
 
         self.sprinkling = True
         self.processes = []
@@ -230,16 +192,19 @@ class Processor:
 
         self.memory_usage_queue.put(MemoryUsage("Main", self.last_log_time, psutil.Process(os.getpid()).memory_info().rss))
 
+        # self.memory_log_file = open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a")
+
         self.memory_usage_writer = Process(target=self.write_memory_usage, args=(self.memory_usage_queue,), daemon=True)
         self.memory_usage_writer.start()
 
     def write_memory_usage(self, memory_usage_queue):
-        while True:
-            with open(os.path.join(os.getcwd(), "memlog_direct_refinement.csv"), "a") as memory_log_file:
+        with open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a") as memory_log_file:
+            while True:
                 val = memory_usage_queue.get()
 
                 if val:
                     memory_log_file.write(str(val.process_name) + ", " + str(val.timestamp) + ", " + str(val.memory_usage) + "\n")
+                    memory_log_file.flush()
                 else:
                     time.sleep(0.5)
 
@@ -259,7 +224,6 @@ class Processor:
             if data[0] == "endsprinkle":
                 self.sprinkling = False
                 sys.stderr.write("Sprinkling done!\n")
-                sys.stderr.flush()
 
         elif identifier == "n":
             # Total number of points
@@ -284,8 +248,7 @@ class Processor:
             # vertex
             # All sprinkle points get passed to output directly
             if not self.sprinkling:
-                self.vertices[self.vertex_id] = [float(data[0]), float(data[1]), float(data[2])]
-                self.vertex_id += 1
+                self.triangulation.insert_vertex(float(data[0]), float(data[1]), float(data[2]))
 
             else:
                 sys.stdout.write(input_line)
@@ -303,16 +266,16 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= cpu_count() - 2:
+            while len(self.processes) >= cpu_count() - 4:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
 
                 time.sleep(sleep_time)
 
-            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.vertices, self.stdout_lock, self.memory_usage_queue,), daemon=True)
-            self.vertices = {}
-            self.vertex_id = 1
+            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices, self.stdout_lock, self.memory_usage_queue,), daemon=True)
+            self.triangulation.vertices = {}
+            self.triangulation.vertex_id = 1
             self.processes.append(process)
             process.start()
 
@@ -326,7 +289,6 @@ class Processor:
 if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
-
     start_time = time.time()
 
     for stdin_line in sys.stdin:
@@ -334,5 +296,11 @@ if __name__ == "__main__":
 
     for process in processor.processes:
         process.join()
+
+    # processor.memory_log_file.flush()
+    #
+    # processor.memory_log_file.close()
+
+    processor.memory_usage_writer.terminate()
 
     sys.stderr.write("duration: " + str(time.time() - start_time) + "\n")
