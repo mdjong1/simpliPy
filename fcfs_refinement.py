@@ -1,56 +1,34 @@
+import os
 import sys
 import time
-from heapq import heapify, heappop, _siftup, _siftdown
+import psutil
 
-import startin
+import startinpy
 
 import numpy as np
 
-from math import floor
-from multiprocessing import cpu_count, Process
+from multiprocessing import cpu_count, Process, Lock, Queue, current_process
 from scipy.spatial import KDTree
 
 COARSE_THRESHOLD = 2
 FINE_THRESHOLD = 0.2
 
-# 37EN1 - 2m - 0.2m (6 threads)
-# START TIME: 2021-04-06T09:34:35
-# END TIME:   2021-04-06T18:06:22
 
-# 37EN1 - Ground Only Decimation v1 (shitty) - 3m - 0.3m (10 threads)
-# START TIME: 2021-04-07T14:44:16
-# END TIME:   2021-04-07T17:35:27
-
-# 37EN1 - Ground Only Decimation v2 - 2m - 0.3m (10 threads)
-# START TIME: 2021-04-07T20:14:07
-# END TIME:   2021-04-08T08:24:05
-
-# 37EN2 - 3m - 0.3m (6 threads)
-# START TIME: 2021-04-06T22:00:00
-# END TIME:   2021-04-07T05:27:13
-
-# 37AN1 - 3m - 0.3m (2 threads)
-# START TIME: 2021-04-06T22:28:21
-# END TIME:   2021-04-06T23:56:15
+class MemoryUsage:
+    def __init__(self, process_name, timestamp, memory_usage):
+        self.process_name = process_name
+        self.timestamp = timestamp
+        self.memory_usage = memory_usage
 
 
 class Triangulation:
     def __init__(self):
-        self.total_points = None
-
         self.cell_size = None
-
-        self.grid_dimensions = None
-        self.grid_points = None
-        self.initial_points = None
 
         self.min_x = None
         self.min_y = None
         self.max_x = None
         self.max_y = None
-
-        self.vertices = {}
-        self.vertex_id = 1
 
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
@@ -58,33 +36,11 @@ class Triangulation:
         self.max_x = max_x
         self.max_y = max_y
 
-    def initialize_grid(self, grid_size):
-        self.grid_dimensions = grid_size
-        self.grid_points = np.empty(shape=(grid_size, grid_size), dtype=object)
-        self.initial_points = np.empty(shape=(grid_size, grid_size), dtype=object)
-
-    def insert_point(self, x, y, z, grid_x, grid_y):
-        if type(self.grid_points[grid_x][grid_y]) == list:
-            self.grid_points[grid_x][grid_y].append([x, y, z])
-        else:
-            self.grid_points[grid_x][grid_y] = [[x, y, z]]
-
-    def insert_point_in_grid(self, x, y, z):
-        grid_x, grid_y = self.get_cell(x, y)
-
-        self.insert_point(x, y, z, grid_x, grid_y)
-
-    def insert_vertex(self, x, y, z):
-        self.vertices[self.vertex_id] = [x, y, z]
-        self.vertex_id += 1
-
-    def get_cell(self, x, y):
-        return floor((x - self.min_x) / self.cell_size), floor((y - self.min_y) / self.cell_size)
-
-    def finalize(self, input_line, grid_x, grid_y, vertices):
+    def finalize(self, input_line, grid_x, grid_y, vertices, lock, memory_usage_queue):
+        stdout_lines = []
         if len(vertices) > 0:
 
-            triangulation = startin.DT()
+            triangulation = startinpy.DT()
 
             x_vals = []
             y_vals = []
@@ -159,103 +115,53 @@ class Triangulation:
                 except OSError:
                     pass
 
-            # Decimation step with fine threshold
-            heap = []
-
-            vertex_id = 0
-
-            for vertex in triangulation.all_vertices():
-                x = vertex[0]
-                y = vertex[1]
-                z = vertex[2]
-
-                # Skip infinite vertex
-                if triangulation.can_vertex_be_removed(vertex_id):
-                    triangulation.remove(vertex_id)
-
-                    try:
-                        interpolated_value = triangulation.interpolate_tin_linear(x, y)
-
-                        triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                        heap.append((abs(interpolated_value - z), vertex_id, x, y, z))
-
-                    # In rare cases we get a point outside CH due to ----00.0 being counted as wrong cell
-                    # FIXME: Adjust get_cell function to return correct cell for ----00.0 points
-                    except OSError:
-                        pass
-
-                vertex_id += 1
-
-            heapify(heap)
-
-            while heap:
-                lowest_delta = heappop(heap)
-
-                delta = lowest_delta[0]
-                vertex_id = lowest_delta[1]
-                x = lowest_delta[2]
-                y = lowest_delta[3]
-                z = lowest_delta[4]
-
-                if triangulation.can_vertex_be_removed(vertex_id):
-                    triangulation.remove(vertex_id)
-
-                    try:
-                        interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
-
-                        if interpolated_value > FINE_THRESHOLD:
-                            triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                    except OSError:
-                        triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                if delta > FINE_THRESHOLD:
-                    break
-
-                # Recalculate errors once every 100 points
-                if len(heap) % 100 == 0:
-                    for i in range(len(heap)):
-                        vertex_id = heap[i][1]
-
-                        if triangulation.can_vertex_be_removed(vertex_id):
-                            x = heap[i][2]
-                            y = heap[i][3]
-                            z = heap[i][4]
-
-                            triangulation.remove(vertex_id)
-
-                            try:
-                                interpolated_value = abs(triangulation.interpolate_tin_linear(x, y) - z)
-
-                                triangulation.insert_one_pt(x, y, z, vertex_id)
-
-                                old_val = heap[i]
-                                heap[i] = (interpolated_value, heap[i][1], heap[i][2], heap[i][3], heap[i][4])
-
-                                if heap[i][0] > old_val[0]:
-                                    _siftup(heap, i)
-                                else:
-                                    _siftdown(heap, 0, i)
-
-                            except OSError:
-                                triangulation.insert_one_pt(x, y, z, vertex_id)
+            if triangulation.number_of_vertices() > 4:
+                for i in [1, 2, 3, 4]:
+                    triangulation.remove(i)
 
             for vertex in triangulation.all_vertices():
                 # Don't print infinite vertex
                 if vertex[0] > 0:
-                    sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
+                    stdout_lines.append("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
 
-        sys.stdout.write(input_line)
-        sys.stdout.flush()
+        memory_usage_queue.put(MemoryUsage(current_process().name, round(time.time()), psutil.Process(os.getpid()).memory_info().rss))
+
+        stdout_lines.append(input_line)
+
+        with lock:
+            sys.stdout.write("".join(stdout_lines))
+            sys.stdout.flush()
 
 
 class Processor:
     def __init__(self, dt):
         self.triangulation = dt
 
+        self.vertex_id = 1
+        self.vertices = {}
+
         self.sprinkling = True
         self.processes = []
+
+        self.last_log_time = round(time.time())
+
+        self.stdout_lock = Lock()
+        self.memory_usage_queue = Queue()
+
+        self.memory_usage_queue.put(MemoryUsage("Main", self.last_log_time, psutil.Process(os.getpid()).memory_info().rss))
+
+        self.memory_usage_writer = Process(target=self.write_memory_usage, args=(self.memory_usage_queue,), daemon=True)
+        self.memory_usage_writer.start()
+
+    def write_memory_usage(self, memory_usage_queue):
+        while True:
+            with open(os.path.join(os.getcwd(), "memlog_direct_refinement.csv"), "a") as memory_log_file:
+                val = memory_usage_queue.get()
+
+                if val:
+                    memory_log_file.write(str(val.process_name) + ", " + str(val.timestamp) + ", " + str(val.memory_usage) + "\n")
+                else:
+                    time.sleep(0.5)
 
     def process_line(self, input_line):
         split_line = input_line.rstrip("\n").split(" ")
@@ -263,10 +169,17 @@ class Processor:
         identifier = split_line[0]
         data = split_line[1:]
 
+        current_time = round(time.time())
+
+        if current_time != self.last_log_time:
+            self.memory_usage_queue.put(MemoryUsage("Main", current_time, psutil.Process(os.getpid()).memory_info().rss))
+            self.last_log_time = current_time
+
         if identifier == "#" or identifier == "":
             if data[0] == "endsprinkle":
                 self.sprinkling = False
                 sys.stderr.write("Sprinkling done!\n")
+                sys.stderr.flush()
 
         elif identifier == "n":
             # Total number of points
@@ -275,7 +188,6 @@ class Processor:
 
         elif identifier == "c":
             # Grid dimensions (cXc)
-            # self.triangulation.initialize_grid(int(data[0]))
             sys.stdout.write(input_line)
 
         elif identifier == "s":
@@ -290,18 +202,16 @@ class Processor:
 
         elif identifier == "v":
             # vertex
-            # self.triangulation.insert_point_in_grid(float(data[0]), float(data[1]), float(data[2]))
-
             # All sprinkle points get passed to output directly
             if not self.sprinkling:
-                self.triangulation.insert_vertex(float(data[0]), float(data[1]), float(data[2]))
+                self.vertices[self.vertex_id] = [float(data[0]), float(data[1]), float(data[2])]
+                self.vertex_id += 1
 
             else:
                 sys.stdout.write(input_line)
 
         elif identifier == "x":
             # cell finalizer
-
             # While sprinkling, don't bother processing since all finalized cells now are still empty anyways
             if self.sprinkling:
                 sys.stdout.write(input_line)
@@ -320,9 +230,9 @@ class Processor:
 
                 time.sleep(sleep_time)
 
-            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.triangulation.vertices))
-            self.triangulation.vertices = {}
-            self.triangulation.vertex_id = 1
+            process = Process(target=self.triangulation.finalize, args=(input_line, int(data[0]), int(data[1]), self.vertices, self.stdout_lock, self.memory_usage_queue,), daemon=True)
+            self.vertices = {}
+            self.vertex_id = 1
             self.processes.append(process)
             process.start()
 
@@ -337,8 +247,12 @@ if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
 
+    start_time = time.time()
+
     for stdin_line in sys.stdin:
         processor.process_line(stdin_line)
 
     for process in processor.processes:
         process.join()
+
+    sys.stderr.write("duration: " + str(time.time() - start_time) + "\n")
