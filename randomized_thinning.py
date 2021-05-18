@@ -1,8 +1,10 @@
 import random
 import sys
 
-# 1 / 10 points kept (on average)
-THINNING_FACTOR = 10
+from math import floor
+
+# 1 / THINNING_FACTOR points kept (on average)
+THINNING_FACTOR = 8
 
 
 class Processor:
@@ -32,7 +34,7 @@ class Processor:
 
         elif identifier == "v":
             # vertex
-            if random.randint(0, THINNING_FACTOR) == 1:
+            if random.randint(0, THINNING_FACTOR) == floor(THINNING_FACTOR / 2):
                 sys.stdout.write(input_line)
 
         elif identifier == "x":
@@ -49,6 +51,6 @@ class Processor:
 if __name__ == "__main__":
     processor = Processor()
 
-    for stdin_line in sys.stdin.readlines():
+    for stdin_line in sys.stdin:
         processor.process_line(stdin_line)
 
