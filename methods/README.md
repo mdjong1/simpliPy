@@ -38,6 +38,19 @@ Refinement using an incremental recalculation interval
 
 Simplification using MASB and MAT by [Ravi Peters](https://github.com/tudelft3d/masbcpp/tree/kdtree2)
 
+```
+@article{Peters16,
+	author = {Peters, Ravi and Ledoux, Hugo},
+	title = {Robust approximation of the {Medial Axis Transform} of {LiDAR} point clouds as a tool for visualisation},
+	journal = {Computers \& Geosciences},
+	year = {2016},
+	volume = {90},
+	number = {A},
+	pages = {123--133},
+	month = {mar}
+}
+```
+
 # Randomized Thinning
 
 Randomized thinning based on 1/N points (average)
