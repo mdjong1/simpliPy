@@ -5,8 +5,6 @@ face_count = 0
 
 print("Starting vertex counting")
 
-print(simplified_dt)
-
 for line in open(simplified_dt, "r"):
     split_line = line.split(" ")
     identifier = split_line[0]

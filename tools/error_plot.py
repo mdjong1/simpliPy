@@ -1,4 +1,3 @@
-import math
 import geojson
 
 import numpy as np
