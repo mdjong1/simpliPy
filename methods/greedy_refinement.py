@@ -193,13 +193,11 @@ class Processor:
 
         self.memory_usage_queue.put(MemoryUsage("Main", self.last_log_time, psutil.Process(os.getpid()).memory_info().rss))
 
-        # self.memory_log_file = open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a")
-
         self.memory_usage_writer = Process(target=self.write_memory_usage, args=(self.memory_usage_queue,), daemon=True)
         self.memory_usage_writer.start()
 
     def write_memory_usage(self, memory_usage_queue):
-        with open(os.path.join(os.getcwd(), "../memlog_refinement.csv"), "a") as memory_log_file:
+        with open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a") as memory_log_file:
             while True:
                 val = memory_usage_queue.get()
 
@@ -297,10 +295,6 @@ if __name__ == "__main__":
 
     for process in processor.processes:
         process.join()
-
-    # processor.memory_log_file.flush()
-    #
-    # processor.memory_log_file.close()
 
     processor.memory_usage_writer.terminate()
 

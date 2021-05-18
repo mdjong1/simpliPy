@@ -6,7 +6,6 @@ import startin
 
 import numpy as np
 
-from heapq import heappop, heapify
 from multiprocessing import cpu_count, Process
 from scipy.spatial import KDTree
 
