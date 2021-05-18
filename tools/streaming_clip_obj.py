@@ -9,10 +9,10 @@ if __name__ == "__main__":
 
     input_file = sys.argv[1]
     clip_box = [
-        int(sys.argv[2]),
-        int(sys.argv[3]),
-        int(sys.argv[4]),
-        int(sys.argv[5]),
+        float(sys.argv[2]),
+        float(sys.argv[3]),
+        float(sys.argv[4]),
+        float(sys.argv[5]),
     ]
 
     input_vertex_id = 1
