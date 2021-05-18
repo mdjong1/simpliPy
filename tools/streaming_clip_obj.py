@@ -1,14 +1,22 @@
 import sys
 
 
-input_file = "H:\\LAZ\\C_37EN1_CROP_DECIMATED_v2.obj"
+input_file = "F:\\LAZ\\twotiles_full.obj"
 
 # 37EN1
+# clip_box = [
+#     83200,
+#     445300,
+#     85000,
+#     443750
+# ]
+
+# Twotiles
 clip_box = [
-    83974.0646,
-    446127.1660,
-    84967.6011,
-    447077.8905
+    83200,
+    443750,
+    86800,
+    445300
 ]
 
 # 37EN2
@@ -17,6 +25,14 @@ clip_box = [
 #     446050.8249,
 #     86245.8417,
 #     447235.2819
+# ]
+
+# Fourtiles
+# clip_box = [
+#     84447.2218,
+#     443285.2641,
+#     85840.0555,
+#     444577.5652
 # ]
 
 input_vertex_id = 1

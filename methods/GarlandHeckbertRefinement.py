@@ -173,7 +173,7 @@ class Triangulation:
             for triangle in incident_triangles:
                 self.scan_triangle(triangulation, heap, triangle, vertices)
 
-    def finalize(self, grid_x, grid_y, input_line):
+    def finalize(self, grid_x, grid_y, input_line, thread_id):
         all_points = {}
         points_in_cell = self.grid_points[grid_x][grid_y]
 
@@ -201,8 +201,8 @@ class Triangulation:
             # Get largest delta from heap
             max_abs = heappop(heap)
 
-            sys.stdout.write(str(max_abs) + "\n")
-            sys.stdout.flush()
+            # sys.stdout.write("Thread-{}: {}\n".format(thread_id, max_abs))
+            # sys.stdout.flush()
 
             # If below threshold, we're done!
             if -max_abs.max_error < TRIANGULATION_THRESHOLD:
@@ -260,7 +260,7 @@ class Processor:
             # cell finalizer
             # self.triangulation.finalize(int(data[0]), int(data[1]), input_line)
 
-            thread = threading.Thread(target=self.triangulation.finalize, args=(int(data[0]), int(data[1]), input_line,), daemon=True)
+            thread = threading.Thread(target=self.triangulation.finalize, args=(int(data[0]), int(data[1]), input_line, len(self.threads)), daemon=True)
             self.threads.append(thread)
             thread.start()
 

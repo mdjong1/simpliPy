@@ -51,7 +51,7 @@ class Triangulation:
             masb = subprocess.Popen(
                 [
                     # "/home/maarten/masbcpp/mat_with_mediator_required",
-                    os.path.join(os.getcwd(), "thirdparty\\masbcpp\\mat_with_mediator_required.exe"),
+                    os.path.join(os.getcwd(), "../thirdparty/masbcpp/mat_with_mediator_required.exe"),
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -93,7 +93,7 @@ class Processor:
         self.memory_usage_writer.start()
 
     def write_memory_usage(self, memory_usage_queue):
-        with open(os.path.join(os.getcwd(), "memlog_mat.csv"), "a") as memory_log_file:
+        with open(os.path.join(os.getcwd(), "../memlog_mat.csv"), "a") as memory_log_file:
             while True:
                 val = memory_usage_queue.get()
 

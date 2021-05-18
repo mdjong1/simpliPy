@@ -13,7 +13,7 @@ from heapq import heappop, heapify
 from multiprocessing import cpu_count, Process, Queue, current_process, Lock
 from scipy.spatial import KDTree
 
-RECALCULATION_INTERVAL_STEP_SIZE = 1
+RECALCULATION_INTERVAL_STEP_SIZE = 1/2
 RECALCULATION_INTERVAL_UPPER_BOUNDARY = 25
 
 TRIANGULATION_THRESHOLD = 0.2
@@ -199,7 +199,7 @@ class Processor:
         self.memory_usage_writer.start()
 
     def write_memory_usage(self, memory_usage_queue):
-        with open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a") as memory_log_file:
+        with open(os.path.join(os.getcwd(), "../memlog_refinement.csv"), "a") as memory_log_file:
             while True:
                 val = memory_usage_queue.get()
 
