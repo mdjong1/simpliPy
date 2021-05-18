@@ -1,3 +1,4 @@
+import sys
 import random
 import subprocess
 
@@ -6,68 +7,68 @@ import startin
 from math import floor
 from geojson import Point, Feature, FeatureCollection, dump
 
-simplified_dt = "H:\\LAZ\\twotiles_rand7_clipped.obj"
+if __name__ == "__main__":
+    arguments = sys.argv
+    if len(arguments) != 5:
+        print("Invalid number of arguments used!")
+        print("Usage: compare_error.py <original LAZ> <simplified TIN OBJ file> <output GeoJSON file> <thinning factor>")
+        sys.exit()
 
-original_laz = "H:\\LAZ\\twotiles_clipped.laz"
+    input_laz = sys.argv[1]
+    input_simplified_tin = sys.argv[2]
+    output_file = sys.argv[3]
+    thinning_factor = int(sys.argv[4])
 
-output_file = "H:\\LAZ\\errors_twotiles_rand7_clipped.json"
+    # Load simplified DT into Startin ✔
+    simplified_triangulation = startin.DT()
 
-# interpolate 1/THINNING points
-THINNING = 10
+    print("Starting error calculation process")
 
+    for line in open(input_simplified_tin, "r"):
+        split_line = line.split(" ")
+        identifier = split_line[0]
+        data = split_line[1:]
 
-# Load simplified DT into Startin ✔
-simplified_triangulation = startin.DT()
+        if identifier == "v":
+            simplified_triangulation.insert_one_pt(float(data[0]), float(data[1]), float(data[2]))
 
-print("Starting error calculation process")
+    print("Loaded up all {} of the vertices from the simplified DT".format(simplified_triangulation.number_of_vertices()))
 
-for line in open(simplified_dt, "r"):
-    split_line = line.split(" ")
-    identifier = split_line[0]
-    data = split_line[1:]
+    # Load vertices from original DT as list ✔
+    original_vertices = []
 
-    if identifier == "v":
-        simplified_triangulation.insert_one_pt(float(data[0]), float(data[1]), float(data[2]))
+    las2txt = subprocess.Popen(["thirdparty\\lastools\\las2txt", "-i", input_laz, "-stdout"], stdout=subprocess.PIPE)
 
-print("Loaded up all {} of the vertices from the simplified DT".format(simplified_triangulation.number_of_vertices()))
+    # https://gis.stackexchange.com/questions/130963/write-geojson-into-a-geojson-file-with-python
+    features = []
 
-# Load vertices from original DT as list ✔
-original_vertices = []
+    # For each vertex in the original DT ✔
+    for line in las2txt.stdout:
+        if random.randint(0, thinning_factor) == floor(thinning_factor / 2):
+            stripped_line = str(line.rstrip(), "utf-8")
+            split_line = stripped_line.split()
+            split_line = [float(val) for val in split_line]
 
-las2txt = subprocess.Popen(["thirdparty\\lastools\\las2txt", "-i", original_laz, "-stdout"], stdout=subprocess.PIPE)
+            x = split_line[0]
+            y = split_line[1]
+            z = split_line[2]
 
-# For each vertex in the original DT ✔
-    # Interpolate the error for this vertex ✔
-    # Attach error for vertex to vertex class ✔
+            try:
+                # Interpolate the error for this vertex ✔
+                interpolated_value = simplified_triangulation.interpolate_tin_linear(x, y)
 
-# https://gis.stackexchange.com/questions/130963/write-geojson-into-a-geojson-file-with-python
+                # Attach error for vertex to vertex class ✔
+                features.append(Feature(geometry=Point((x, y, z)), properties={"error": z - interpolated_value}))
 
-features = []
+            except OSError:
+                print("Could not interpolate {}, {}; skipping.".format(x, y))
 
-for line in las2txt.stdout:
-    if random.randint(0, THINNING) == floor(THINNING / 2):
-        stripped_line = str(line.rstrip(), "utf-8")
-        split_line = stripped_line.split()
-        split_line = [float(val) for val in split_line]
+    print("Creating feature collection")
 
-        x = split_line[0]
-        y = split_line[1]
-        z = split_line[2]
+    # Output each vertex to a GeoJSON file including attribute error ✔
+    feature_collection = FeatureCollection(features)
 
-        try:
-            interpolated_value = simplified_triangulation.interpolate_tin_linear(x, y)
+    print("Writing to file")
 
-            features.append(Feature(geometry=Point((x, y, z)), properties={"error": z - interpolated_value}))
-
-        except OSError:
-            print("Could not interpolate {}, {}".format(x, y))
-
-print("Creating feature collection")
-
-# Output each vertex to a GeoJSON file including attribute error ✔
-feature_collection = FeatureCollection(features)
-
-print("Writing to file")
-
-with open(output_file, "w") as f:
-    dump(feature_collection, f)
+    with open(output_file, "w") as f:
+        dump(feature_collection, f)
