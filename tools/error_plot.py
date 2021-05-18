@@ -6,8 +6,9 @@ import seaborn as sns
 
 from matplotlib import pyplot as plt
 
-# input_file = "4-12-21\\errors_crop_10_groundonly_refinement_clearcorners.json"
-input_file = "H:\\LAZ\\errors_twotiles_rand7_clipped.json"
+input_file = "H:\\LAZ\\errors_delftSmall_mat02.json"
+threshold = 0.2
+plot_name = "Two Tiles - FCFS"
 
 with open(input_file) as f:
     gj = geojson.load(f)
@@ -26,8 +27,10 @@ print("Largest error = {}".format(np.max(errors)))
 
 print("Std Deviation = {}".format(np.std(errors)))
 
-# rmse = math.sqrt(np.sum(np.square(errors) / len(errors)))
-rmse = math.sqrt(np.average(errors))
+# TODO: Double-check which RMSE to use
+# rmse = math.sqrt(np.average(errors))
+rmse = np.sqrt((errors ** 2).mean())
+
 print("RMSE = {}".format(rmse))
 
 bins = np.linspace(0, 8, 40)
@@ -49,19 +52,15 @@ for i in range(1, max_pow):
 
 y_ticks.append(y_max)
 
-print(y_ticks)
-
-plt.title("Two Tiles - FCFS")
+plt.title(plot_name)
 
 sns.histplot(errors, bins=bins, log_scale=(False, True))
 
 # https://stackoverflow.com/questions/16180946/drawing-average-line-in-histogram-matplotlib
 min_ylim, max_ylim = plt.ylim()
 
-print(min_ylim)
-
-plt.axvline(0.2, color='k', linestyle='dashed', linewidth=1)
-plt.text(0.2, max_ylim * 1.2, 'Threshold: {:.2f}'.format(0.2))
+plt.axvline(threshold, color='k', linestyle='dashed', linewidth=1)
+plt.text(threshold, max_ylim * 1.2, 'Threshold: {:.2f}'.format(threshold))
 
 plt.axvline(rmse, color='r', linestyle='dashed', linewidth=1)
 plt.text(rmse * 1.2, max_ylim * 0.2, 'RMSE: {:.2f}'.format(rmse))
