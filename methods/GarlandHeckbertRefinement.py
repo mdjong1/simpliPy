@@ -2,7 +2,7 @@ import collections
 import sys
 import threading
 
-import startin
+import startinpy
 
 import numpy as np
 
@@ -186,7 +186,7 @@ class Triangulation:
 
         corner_points = self.get_corner_points(grid_x, grid_y)
 
-        triangulation = startin.DT()
+        triangulation = startinpy.DT()
 
         heap = []
 

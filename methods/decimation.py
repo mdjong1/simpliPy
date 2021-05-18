@@ -3,7 +3,7 @@ import sys
 import time
 
 import psutil
-import startinpy
+import startin
 
 from heapq import heappop, heapify
 from ast import literal_eval
@@ -24,7 +24,7 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
-        self.triangulation = startinpy.DT()
+        self.triangulation = startin.DT()
         self.triangulation.set_is_init(True)
 
         self.processing_id = 1
@@ -42,8 +42,6 @@ class Triangulation:
         self.triangulation.output_bbox(min_x, min_y, max_x, max_y)
 
     def add_vertex(self, x, y, z):
-        # self.vertices[self.vertex_id] = [x, y, z]
-
         self.triangulation.insert_vertex(self.vertex_id, x, y, z)
 
         self.vertex_id += 1
@@ -90,7 +88,6 @@ class Triangulation:
 
             # If delta is still below threshold, throw it out
             if delta < TRIANGULATION_THRESHOLD:
-                # print("Removing {} with delta {}".format(val[1], delta))
                 remove_count += 1
                 removes_this_loop += 1
                 self.triangulation.remove(smallest_delta_vertex[1])
