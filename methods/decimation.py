@@ -3,7 +3,7 @@ import sys
 import time
 
 import psutil
-import startin
+import startinpy
 
 from heapq import heappop, heapify
 from ast import literal_eval
@@ -24,7 +24,7 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
-        self.triangulation = startin.DT()
+        self.triangulation = startinpy.DT()
         self.triangulation.set_is_init(True)
 
         self.processing_id = 1
