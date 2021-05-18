@@ -2,23 +2,9 @@ import subprocess
 import sys
 import os
 import time
-from math import floor
-
 import psutil
 
-import startin
-
-import numpy as np
-
-from heapq import heappop, heapify
 from multiprocessing import cpu_count, Process, Queue, current_process, Lock
-from scipy.spatial import KDTree
-
-RECALCULATION_INTERVAL_STEP_SIZE = 1/2
-RECALCULATION_INTERVAL_UPPER_BOUNDARY = 25
-
-TRIANGULATION_THRESHOLD = 0.2
-DELTA_PRECISION = 1E4
 
 
 class MemoryUsage:
@@ -26,20 +12,6 @@ class MemoryUsage:
         self.process_name = process_name
         self.timestamp = timestamp
         self.memory_usage = memory_usage
-
-
-class Vertex:
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
-        self.delta_z = 0
-
-    def __str__(self):
-        return "{} {} {} - {}".format(self.x, self.y, self.z, (self.delta_z / DELTA_PRECISION) * -1)
-
-    def __lt__(self, other):
-        return self.delta_z < other.delta_z
 
 
 class Triangulation:
@@ -50,6 +22,8 @@ class Triangulation:
         self.min_y = None
         self.max_x = None
         self.max_y = None
+        self.min_z = None
+        self.max_z = None
 
     def set_bbox(self, min_x, min_y, max_x, max_y, min_z, max_z):
         self.min_x = min_x
@@ -74,17 +48,20 @@ class Triangulation:
 
             input_data += "".join(["v {} {} {}\n".format(vertex[0], vertex[1], vertex[2]) for vertex in vertices])
 
-            process = subprocess.Popen(
-                ["thirdparty\\masbcpp\\mat_with_mediator_required.exe"],
+            masb = subprocess.Popen(
+                [
+                    # "/home/maarten/masbcpp/mat_with_mediator_required",
+                    os.path.join(os.getcwd(), "thirdparty\\masbcpp\\mat_with_mediator_required.exe"),
+                ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True
             )
 
-            shit = process.communicate(input_data)[0]
+            memory_usage_queue.put(MemoryUsage(current_process().name, round(time.time()), psutil.Process(os.getpid()).memory_info().rss))
 
-            stdout_lines.append(shit)
+            stdout_lines.append(masb.communicate(input_data)[0])
 
         with lock:
             stdout_lines.append(input_line)
@@ -116,7 +93,7 @@ class Processor:
         self.memory_usage_writer.start()
 
     def write_memory_usage(self, memory_usage_queue):
-        with open(os.path.join(os.getcwd(), "memlog_refinement.csv"), "a") as memory_log_file:
+        with open(os.path.join(os.getcwd(), "memlog_mat.csv"), "a") as memory_log_file:
             while True:
                 val = memory_usage_queue.get()
 
@@ -184,7 +161,7 @@ class Processor:
             sleep_time = 1
 
             # Ensure total number of processes never exceeds capacity
-            while len(self.processes) >= 1:
+            while len(self.processes) >= 4:
                 for i in reversed(range(len(self.processes))):
                     if not self.processes[i].is_alive():
                         del self.processes[i]
