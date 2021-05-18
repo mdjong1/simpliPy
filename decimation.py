@@ -1,11 +1,17 @@
+import os
 import sys
-import startin
+import time
 
-from heapq import heappush, heappop
+import psutil
+import startinpy
+
+from heapq import heappop, heapify
 from ast import literal_eval
 
 TRIANGULATION_THRESHOLD = 0.2
-PROCESSING_THRESHOLD = 5000
+PROCESSING_THRESHOLD = 100000
+
+INTERVAL = 100
 
 
 class Triangulation:
@@ -18,13 +24,15 @@ class Triangulation:
         self.vertices = {}
         self.vertex_id = 1
 
-        self.triangulation = startin.DT()
+        self.triangulation = startinpy.DT()
         self.triangulation.set_is_init(True)
 
         self.processing_id = 1
         self.processing_index = 1
 
         self.finalized = {}
+
+        self.memory_log_file = open(os.path.join(os.getcwd(), "memlog_decimation.csv"), "a")
 
     def set_bbox(self, min_x, min_y, max_x, max_y):
         self.min_x = min_x
@@ -52,9 +60,9 @@ class Triangulation:
 
     def simplify_triangulation(self, finalize=False):
 
-        # total_vertices = self.triangulation.number_of_vertices()
+        did_something = False
 
-        # print("Processing {} vertices!".format(total_vertices))
+        self.memory_log_file.write("Main, " + str(round(time.time())) + ", " + str(psutil.Process(os.getpid()).memory_info().rss) + "\n")
 
         heap = []
 
@@ -64,46 +72,48 @@ class Triangulation:
             if not self.triangulation.can_vertex_be_removed(vertex_id):
                 continue
 
-            heappush(heap, (self.calculate_delta(vertex_id), vertex_id))
+            heap.append((self.calculate_delta(vertex_id), vertex_id))
 
-        try:
-            smallest_delta_vertex = heappop(heap)
-        except IndexError:  # No items in heap; no vertices 'can_vertex_be_removed()'
-            return
+        sys.stderr.write("Size of heap: {}\n".format(len(heap)))
+        sys.stderr.flush()
+
+        heapify(heap)
 
         remove_count = 0
+        removes_this_loop = 0
 
-        while smallest_delta_vertex:
+        while heap:
+            smallest_delta_vertex = heappop(heap)
+
             # Get latest delta for this point
-            delta = self.calculate_delta(smallest_delta_vertex[1])
+            delta = smallest_delta_vertex[0]
 
             # If delta is still below threshold, throw it out
             if delta < TRIANGULATION_THRESHOLD:
                 # print("Removing {} with delta {}".format(val[1], delta))
                 remove_count += 1
+                removes_this_loop += 1
                 self.triangulation.remove(smallest_delta_vertex[1])
+                did_something = True
+            else:
+                break
 
-            try:
-                smallest_delta_vertex = heappop(heap)
-            except IndexError:
-                smallest_delta_vertex = None
+            if removes_this_loop % INTERVAL == 0:
+                sys.stderr.write("Recalculating heap\n")
+                sys.stderr.flush()
 
-        # self.triangulation.write_geojson_triangles("data\\after_simplification" + str(remove_count) + ".json")
+                removes_this_loop = 0
 
-        self.triangulation.write_stars_obj(finalize)
+                for vertex_id in range(len(heap)):
+                    if self.triangulation.can_vertex_be_removed(vertex_id):
+                        heap[vertex_id] = (self.calculate_delta(vertex_id), vertex_id)
 
-        # for vertex in self.triangulation.all_unwritten_vertices(finalize):
-        #     if vertex[0] > 0:
-        #         sys.stdout.write("v " + str(vertex[0]) + " " + str(vertex[1]) + " " + str(vertex[2]) + "\n")
-        #
-        # for edge in self.triangulation.all_unwritten_triangles():
-        #     sys.stdout.write("f " + str(edge[0]) + " " + str(edge[1]) + " " + str(edge[2]) + "\n")
+                heapify(heap)
 
-        # print("Removed {} points in decimation process".format(remove_count))
-        # self.triangulation.cleanup_complete_stars()
+        if did_something:
+            self.triangulation.write_stars_obj(finalize)
 
     def new_star(self, index, neighbors):
-        # self.finalized[index] = (True, len(neighbors))
         if neighbors:
             self.triangulation.define_star(index, neighbors)
 
@@ -114,8 +124,6 @@ class Triangulation:
 
     def delete_vertex(self, index):
         self.finalized[index] = True
-        # del self.vertices[index]
-        # self.triangulation.remove(index)
 
 
 class Processor:
@@ -148,7 +156,6 @@ class Processor:
 
         elif identifier == "x":
             # vertex finalizer
-            # self._triangulation.delete_vertex(int(data[0]))
             self._triangulation.new_star(int(data[0]), literal_eval("".join(data[1:])))
 
         else:
@@ -160,9 +167,20 @@ if __name__ == "__main__":
     triangulation = Triangulation()
     processor = Processor(triangulation)
 
+    start_time = time.time()
+
     for stdin_line in sys.stdin:
         processor.process_line(stdin_line)
 
     # Finalize remaining points
     triangulation.simplify_triangulation(finalize=True)
+
+    triangulation.memory_log_file.write("Main, " + str(round(time.time())) + ", " + str(psutil.Process(os.getpid()).memory_info().rss) + "\n")
+
+    triangulation.memory_log_file.flush()
+
+    triangulation.memory_log_file.close()
+
+    sys.stderr.write("duration: " + str(time.time() - start_time) + "\n")
+
 
