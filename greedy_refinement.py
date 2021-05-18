@@ -116,7 +116,7 @@ class Triangulation:
 
                 # If outside CH, always insert
                 except OSError:
-                    triangulation.insert_one_pt(vertex.x, vertex.y, vertex.z, 0)
+                    triangulation.insert_one_pt(vertex.x, vertex.y, vertex.z)
 
             heapify(heap)
 
@@ -135,7 +135,7 @@ class Triangulation:
 
                 if (largest_delta.delta_z / DELTA_PRECISION) * -1 > TRIANGULATION_THRESHOLD:
                     try:
-                        triangulation.insert_one_pt(largest_delta.x, largest_delta.y, largest_delta.z, 0)
+                        triangulation.insert_one_pt(largest_delta.x, largest_delta.y, largest_delta.z)
                         points_processed_this_loop += 1
 
                     # Somehow point is outside bbox, ignore
@@ -161,9 +161,10 @@ class Triangulation:
 
                     heapify(heap)
 
-            # Remove initial corners
-            for i in [1, 2, 3, 4]:
-                triangulation.remove(i)
+            if triangulation.number_of_vertices() > 4:
+                # Remove initial corners
+                for i in [1, 2, 3, 4]:
+                    triangulation.remove(i)
 
             # Output all remaining vertices
             for vertex in triangulation.all_vertices():
