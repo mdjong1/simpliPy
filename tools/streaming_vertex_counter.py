@@ -8,7 +8,6 @@ print("Starting vertex counting")
 for line in open(simplified_dt, "r"):
     split_line = line.split(" ")
     identifier = split_line[0]
-    data = split_line[1:]
 
     if identifier == "v":
         vertex_count += 1
