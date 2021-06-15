@@ -25,7 +25,7 @@ if __name__ == "__main__":
         data = split_line[1:]
 
         if identifier == "v":
-            simplified_triangulation.insert_one_pt(float(data[0]), float(data[1]), float(data[2]), 0)
+            simplified_triangulation.insert_one_pt(float(data[0]), float(data[1]), float(data[2]))
 
     # Load vertices from original DT as list ✔
     original_vertices = []

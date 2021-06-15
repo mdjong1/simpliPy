@@ -27,7 +27,7 @@ print("Largest error = {}".format(np.max(errors)))
 print("Std Deviation = {}".format(np.std(errors)))
 
 # TODO: Double-check which RMSE to use
-# rmse = math.sqrt(np.average(errors))
+# rmse = np.sqrt(np.average(errors))
 rmse = np.sqrt((errors ** 2).mean())
 
 print("RMSE = {}".format(rmse))
@@ -64,8 +64,11 @@ plt.text(threshold, max_ylim * 1.2, 'Threshold: {:.2f}'.format(threshold))
 plt.axvline(rmse, color='r', linestyle='dashed', linewidth=1)
 plt.text(rmse * 1.2, max_ylim * 0.2, 'RMSE: {:.2f}'.format(rmse))
 
-plt.axvline(errors.mean(), color='b', linestyle='dashed', linewidth=1)
-plt.text(errors.mean() * 1.4, max_ylim * 0.5, 'Mean: {:.2f}'.format(np.mean(errors)))
+# plt.axvline(np.mean(errors), color='b', linestyle='dashed', linewidth=1)
+# plt.text(np.mean(errors) * 1.4, max_ylim * 0.5, 'Mean: {:.2f}'.format(np.mean(errors)))
+
+plt.axvline(np.median(errors), color='c', linestyle='dashed', linewidth=1)
+plt.text(np.median(errors) * 1.4, max_ylim * 0.5, 'Median: {:.2f}'.format(np.median(errors)))
 
 plt.xlabel("Vertex z-error (m)")
 plt.ylabel("Frequency")

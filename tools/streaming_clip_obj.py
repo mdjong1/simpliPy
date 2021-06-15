@@ -4,7 +4,7 @@ if __name__ == "__main__":
     arguments = sys.argv
     if len(arguments) != 6:
         print("Invalid number of arguments used!")
-        print("Usage: streaming_clip_obj.py <input OBJ file> <minX> <minY> <maxX> <maxY>")
+        print("Usage: streaming_clip_obj.py <input OBJ file> <minX> <minY> <maxX> <maxY> > <output OBJ file>")
         sys.exit()
 
     input_file = sys.argv[1]

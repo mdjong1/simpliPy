@@ -132,6 +132,7 @@ class Triangulation:
             sys.stdout.write("".join(stdout_lines))
             sys.stdout.flush()
 
+        sys.stderr.write(current_process().name + " - FINISHED.\n")
 
 class Processor:
     def __init__(self, dt):
@@ -199,6 +200,9 @@ class Processor:
             # bbox
             self.triangulation.set_bbox(float(data[0]), float(data[1]), float(data[2]), float(data[3]))
             sys.stdout.write(input_line)
+
+            sys.stderr.write(input_line)
+            sys.stderr.flush()
 
         elif identifier == "v":
             # vertex

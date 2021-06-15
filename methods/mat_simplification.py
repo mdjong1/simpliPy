@@ -51,7 +51,8 @@ class Triangulation:
             masb = subprocess.Popen(
                 [
                     # "/home/maarten/masbcpp/mat_with_mediator_required",
-                    os.path.join(os.getcwd(), "../thirdparty/masbcpp/streaming_mat_simplification.exe"),
+                    os.path.join(os.getcwd(), "thirdparty\\masbcpp\\streaming_mat_simplification.exe"),
+                    "-squared"
                 ],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
