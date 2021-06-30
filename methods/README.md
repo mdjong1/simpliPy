@@ -1,7 +1,31 @@
+# Usage
+All the code seen here relies on [sst](https://github.com/hugoledoux/sst) which is a streaming pipeline that can be used
+to create Delaunay TINs of extremely large point clouds. By using the streaming geometries paradigm it allows for processing
+point clouds in smaller cells, ensuring no memory bottlenecks are encountered.
+
+The simplification methods introduced in this repository are meant to be added in between the existing programs from
+_sst_.
+
+### Example Usage
+
+```bash
+./sstfin your-point-cloud.laz -g 50 | python3 fcfs_refinement.py | ./sstdt > your-delaunay-tin.obj
+```
+
+* -g indicates that you only want to use building, ground, and water points (exclude vegetation) (optional)  
+* 50 is the cellsize
+
 # Decimation
 
-!! Requires a [custom build](https://github.com/mdjong1/startinpy/tree/feature/insert_stars_directly) of startinPy
+**!!** Requires a [custom build](https://github.com/mdjong1/startinpy/tree/feature/insert_stars_directly) of startinPy
 that allows direct insertion of vertices and stars.
+
+### Example Usage
+```bash
+./sstfin your-point-cloud.laz -g 50 | ./sstdt | python3 decimation.py > your-delaunay-tin.obj
+```
+
+Decimation is placed after the Triangulator in the streaming pipeline.
 
 # FCFS + Decim Refinement
 
